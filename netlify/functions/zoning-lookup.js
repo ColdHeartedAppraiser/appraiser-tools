@@ -3,22 +3,32 @@
 
 const GOOGLE_GEOCODE = 'https://maps.googleapis.com/maps/api/geocode/json';
 
+// LA City GeoHub ArcGIS REST endpoints (public, no auth required)
 const LA_CITY = {
+  // Base zoning polygons
   zoning: 'https://maps.lacity.org/lahub/rest/services/City_Planning_Department/MapServer/0/query',
+  // General plan land use
   generalPlan: 'https://maps.lacity.org/lahub/rest/services/City_Planning_Department/MapServer/1/query',
+  // Transit Oriented Communities (TOC) tiers
   toc: 'https://maps.lacity.org/lahub/rest/services/City_Planning_Department/MapServer/23/query',
+  // Historic Preservation Overlay Zones
   hpoz: 'https://maps.lacity.org/lahub/rest/services/City_Planning_Department/MapServer/6/query',
+  // Specific plans
   specificPlan: 'https://maps.lacity.org/lahub/rest/services/City_Planning_Department/MapServer/7/query',
+  // Very High Fire Hazard Severity Zone
   fireHazard: 'https://maps.lacity.org/lahub/rest/services/City_Planning_Department/MapServer/21/query',
+  // Hillside area
   hillside: 'https://maps.lacity.org/lahub/rest/services/City_Planning_Department/MapServer/10/query',
 };
 
+// LA County eGIS endpoints (unincorporated areas)
 const LA_COUNTY = {
   zoning: 'https://arcgis.gis.lacounty.gov/arcgis/rest/services/DRP/LUIMS/MapServer/4/query',
   generalPlan: 'https://arcgis.gis.lacounty.gov/arcgis/rest/services/DRP/LUIMS/MapServer/2/query',
   fireHazard: 'https://arcgis.gis.lacounty.gov/arcgis/rest/services/DRP/LUIMS/MapServer/13/query',
 };
 
+// Query a single ArcGIS layer by lat/lng point
 async function queryLayer(url, lat, lng, outFields = '*') {
   const params = new URLSearchParams({
     f: 'json',
@@ -37,25 +47,41 @@ async function queryLayer(url, lat, lng, outFields = '*') {
   return data.features && data.features.length > 0 ? data.features[0].attributes : null;
 }
 
+// Determine if point is within City of LA boundary
 async function detectJurisdiction(lat, lng) {
   try {
-    const result = await queryLayer('https://maps.lacity.org/lahub/rest/services/Boundaries/MapServer/12/query', lat, lng, 'CITY_NAME');
-    if (result && result.CITY_NAME && result.CITY_NAME.toLowerCase().includes('los angeles')) return 'city_la';
-  } catch (e) {}
+    const cityBoundaryUrl = 'https://maps.lacity.org/lahub/rest/services/Boundaries/MapServer/12/query';
+    const result = await queryLayer(cityBoundaryUrl, lat, lng, 'CITY_NAME');
+    if (result && result.CITY_NAME && result.CITY_NAME.toLowerCase().includes('los angeles')) {
+      return 'city_la';
+    }
+  } catch (e) { /* fall through */ }
+  
+  // Check if in any incorporated city vs unincorporated county
   try {
-    const result = await queryLayer('https://arcgis.gis.lacounty.gov/arcgis/rest/services/DRP/LUIMS/MapServer/0/query', lat, lng, 'CITY_TYPE');
+    const countyUrl = 'https://arcgis.gis.lacounty.gov/arcgis/rest/services/DRP/LUIMS/MapServer/0/query';
+    const result = await queryLayer(countyUrl, lat, lng, 'CITY_TYPE');
     if (result && result.CITY_TYPE === 'UNINCORPORATED') return 'uninc_la';
-  } catch (e) {}
+  } catch (e) { /* fall through */ }
+
   return 'other';
 }
 
+// Parse zoning code into components for HBU analysis
 function parseZoning(zone) {
-  if (!zone) return { base: null, heightDistrict: null, conditional: null, raw: null };
+  if (!zone) return { base: null, tier: null, overlay: null };
   const z = zone.toUpperCase().trim();
-  const m = z.match(/^([QT]?)\(?([A-Z0-9][A-Z0-9.]*)-?(\d[A-Z0-9]*)?/);
-  return { base: m ? m[2] : z, heightDistrict: m ? m[3] : null, conditional: m && m[1] ? m[1] : null, raw: zone };
+
+  // City of LA zone format: e.g. R1-1, RD1.5-1, C2-1VL, Q(R3-1), T(R2-1)
+  const overlayMatch = z.match(/^([QT]?)\(?([A-Z0-9][A-Z0-9.]*)-?(\d[A-Z0-9]*)?/);
+  const base = overlayMatch ? overlayMatch[2] : z;
+  const heightDistrict = overlayMatch ? overlayMatch[3] : null;
+  const conditional = overlayMatch && overlayMatch[1] ? overlayMatch[1] : null;
+
+  return { base, heightDistrict, conditional, raw: zone };
 }
 
+// Determine SB9 eligibility based on zone and overlays
 function determineSB9(zone, isHPOZ, isTOC, fireZone) {
   if (!zone) return 'unknown — insufficient zoning data';
   const z = zone.toUpperCase();
@@ -66,17 +92,93 @@ function determineSB9(zone, isHPOZ, isTOC, fireZone) {
   return 'potentially eligible — single-family zone; confirm no specific plan exclusions';
 }
 
-function buildFeasibleText(zoneBase, isTOC, tocTier) {
+// Build HBU test data from all layer results
+function buildHBUData(jurisdiction, zoning, generalPlan, toc, hpoz, specificPlan, fireHazard, hillside, address) {
+  const z = parseZoning(zoning);
+  const isHPOZ = !!(hpoz);
+  const isTOC = !!(toc);
+  const tocTier = toc ? (toc.TIER || toc.TOC_TIER || toc.Tier || '—') : null;
+  const fireZone = fireHazard ? (fireHazard.HAZ_CLASS || fireHazard.ZONE || fireHazard.FireHazardSeverityZone || '') : null;
+  const isHillside = !!(hillside);
+  const gpLandUse = generalPlan ? (generalPlan.GPLU || generalPlan.LU || generalPlan.GeneralPlanLandUse || generalPlan.LAND_USE || '—') : '—';
+  const specificPlanName = specificPlan ? (specificPlan.SP_NAME || specificPlan.NAME || specificPlan.SpecificPlan || null) : null;
+
+  const zoneBase = z.base || '—';
+  const rawZone = z.raw || '—';
+
+  // Build legally permissible text
+  let permitted = `Base zone: ${rawZone}`;
+  if (z.conditional) permitted += ` (${z.conditional === 'Q' ? 'Q-condition applies' : 'T-condition applies'})`;
+  if (z.heightDistrict) permitted += `; Height District ${z.heightDistrict}`;
+  if (gpLandUse && gpLandUse !== '—') permitted += `; General Plan: ${gpLandUse}`;
+  if (specificPlanName) permitted += `; within ${specificPlanName} Specific Plan`;
+  if (isHPOZ) permitted += '; HPOZ — historic preservation overlay applies';
+  if (isTOC && tocTier) permitted += `; TOC Tier ${tocTier} — density bonus eligible`;
+  permitted += '; ADU and JADU permitted by right per state law';
+
+  // Build physically possible text
+  let physical = 'To be confirmed from inspection and physical observation.';
+  if (isHillside) physical = 'Hillside area — grading ordinance applies; slope analysis required; reduced development potential possible.';
+  if (fireZone) physical += ` Fire Hazard Severity Zone: ${fireZone} — fire hardening requirements apply.`;
+
+  // Determine feasible use
+  let feasible = buildFeasibleText(zoneBase, isTOC, tocTier, jurisdiction);
+
+  // SB9 analysis
+  const sb9 = determineSB9(rawZone, isHPOZ, isTOC, fireZone);
+
+  // Additional flags
+  const flags = [];
+  if (isHPOZ) flags.push('HPOZ — exterior alterations require HPOZ board approval');
+  if (specificPlanName) flags.push(`Specific Plan (${specificPlanName}) — may impose additional use or development standards`);
+  if (isTOC) flags.push(`TOC Tier ${tocTier} — density bonus available for affordable housing projects`);
+  if (isHillside) flags.push('Hillside Grading Ordinance applies');
+  if (fireZone && fireZone !== '') flags.push(`Fire Hazard Zone: ${fireZone}`);
+
+  return {
+    jurisdiction,
+    address,
+    rawZone,
+    zoneBase,
+    heightDistrict: z.heightDistrict,
+    generalPlan: gpLandUse,
+    specificPlan: specificPlanName,
+    isHPOZ,
+    isTOC,
+    tocTier,
+    fireZone,
+    isHillside,
+    sb9,
+    permitted,
+    physical,
+    feasible,
+    flags,
+    // Pre-filled HBU test fields
+    hbu: {
+      zoning: rawZone + (z.heightDistrict ? `-${z.heightDistrict}` : '') + (gpLandUse !== '—' ? ` — General Plan: ${gpLandUse}` : ''),
+      permitted,
+      physical: physical + ' Confirm lot dimensions, utilities, topography.',
+      feasible,
+      maxprod: buildMaxProd(zoneBase, isHPOZ, isTOC),
+      vacant: buildVacantConclusion(zoneBase, isTOC, isHillside, jurisdiction),
+      improved: 'Continued use as currently improved, subject to confirmation of condition, functional utility, and market support.',
+    }
+  };
+}
+
+function buildFeasibleText(zoneBase, isTOC, tocTier, jurisdiction) {
   if (!zoneBase) return 'To be determined based on zoning analysis.';
   const z = zoneBase.toUpperCase();
   if (z.startsWith('R1') || z === 'RS' || z.startsWith('RE') || z === 'RA') {
-    let t = 'Single-family residential use with ADU is financially feasible given current market conditions.';
+    let t = 'Single-family residential use with ADU is financially feasible given current market conditions and demand for owner-occupied housing.';
     if (isTOC) t += ` TOC Tier ${tocTier} density bonus available for qualified affordable projects.`;
     return t;
   }
-  if (z.startsWith('R2')) return 'Two-family residential use is financially feasible; single-family with ADU also viable.';
-  if (z.startsWith('R3') || z.startsWith('RD')) return 'Multi-family residential development is financially feasible given zone allowances and market demand.';
-  if (z.startsWith('C')) return 'Commercial or mixed-use development is financially feasible; verify per height district and specific plan.';
+  if (z.startsWith('R2')) return 'Two-family residential use is financially feasible; single-family with ADU also viable. Market demand supports both configurations.';
+  if (z.startsWith('R3') || z.startsWith('RD')) return 'Multi-family residential development is financially feasible given zone allowances and market demand for rental housing in the subject area.';
+  if (z.startsWith('C1') || z.startsWith('C2') || z.startsWith('CR')) return 'Commercial retail/service uses are financially feasible; mixed-use residential over commercial may also be viable depending on specific plan and height district allowances.';
+  if (z.startsWith('CM')) return 'Commercial manufacturing uses are financially feasible; consider compatibility with surrounding land uses.';
+  if (z.startsWith('P')) return 'Parking use or associated commercial use is financially feasible per zone allowances.';
   return 'Financial feasibility to be determined based on zoning allowances, market demand, and development costs.';
 }
 
@@ -96,74 +198,26 @@ function buildMaxProd(zoneBase, isHPOZ, isTOC) {
   return 'Use generating the highest value consistent with legal, physical, and financial constraints.';
 }
 
-function buildVacantConclusion(zoneBase, isTOC, isHillside) {
+function buildVacantConclusion(zoneBase, isTOC, isHillside, jurisdiction) {
   if (!zoneBase) return 'To be determined based on zoning analysis.';
   const z = zoneBase.toUpperCase();
   if (z.startsWith('R1') || z === 'RS' || z.startsWith('RE') || z === 'RA') {
-    if (isHillside) return 'Development of a single-family residence consistent with hillside grading ordinance requirements.';
+    if (isHillside) return 'Development of a single-family residence consistent with hillside grading ordinance requirements and zone standards.';
     return 'Development of a single-family residence with optional ADU as permitted by right under state law.';
   }
   if (z.startsWith('R2')) return 'Development of a duplex or single-family residence with ADU to maximize allowable residential density.';
   if (z.startsWith('R3') || z.startsWith('RD')) {
-    if (isTOC) return 'Development of a multi-family residential project utilizing TOC density bonus to maximize unit count and land value.';
+    if (isTOC) return `Development of a multi-family residential project utilizing TOC density bonus to maximize unit count and land value.`;
     return 'Development of a multi-family residential project at maximum allowable density per zone standards.';
   }
   if (z.startsWith('C')) return 'Development of a commercial or mixed-use project at maximum allowable FAR consistent with height district and general plan.';
   return 'Development of the highest and best use consistent with zoning, physical characteristics, and market demand.';
 }
 
-function buildHBUData(jurisdiction, zoning, generalPlan, toc, hpoz, specificPlan, fireHazard, hillside, address) {
-  const z = parseZoning(zoning);
-  const isHPOZ = !!(hpoz);
-  const isTOC = !!(toc);
-  const tocTier = toc ? (toc.TIER || toc.TOC_TIER || toc.Tier || '—') : null;
-  const fireZone = fireHazard ? (fireHazard.HAZ_CLASS || fireHazard.ZONE || fireHazard.FireHazardSeverityZone || '') : null;
-  const isHillside = !!(hillside);
-  const gpLandUse = generalPlan ? (generalPlan.GPLU || generalPlan.LU || generalPlan.LAND_USE || '—') : '—';
-  const specificPlanName = specificPlan ? (specificPlan.SP_NAME || specificPlan.NAME || null) : null;
-  const zoneBase = z.base || '—';
-  const rawZone = z.raw || '—';
-
-  let permitted = `Base zone: ${rawZone}`;
-  if (z.conditional) permitted += ` (${z.conditional === 'Q' ? 'Q-condition applies' : 'T-condition applies'})`;
-  if (z.heightDistrict) permitted += `; Height District ${z.heightDistrict}`;
-  if (gpLandUse && gpLandUse !== '—') permitted += `; General Plan: ${gpLandUse}`;
-  if (specificPlanName) permitted += `; within ${specificPlanName} Specific Plan`;
-  if (isHPOZ) permitted += '; HPOZ — historic preservation overlay applies';
-  if (isTOC && tocTier) permitted += `; TOC Tier ${tocTier} — density bonus eligible`;
-  permitted += '; ADU and JADU permitted by right per state law';
-
-  let physical = 'To be confirmed from inspection and physical observation.';
-  if (isHillside) physical = 'Hillside area — grading ordinance applies; slope analysis required.';
-  if (fireZone) physical += ` Fire Hazard Severity Zone: ${fireZone} — fire hardening requirements apply.`;
-
-  const flags = [];
-  if (isHPOZ) flags.push('HPOZ — exterior alterations require HPOZ board approval');
-  if (specificPlanName) flags.push(`Specific Plan (${specificPlanName}) — may impose additional standards`);
-  if (isTOC) flags.push(`TOC Tier ${tocTier} — density bonus available for affordable housing projects`);
-  if (isHillside) flags.push('Hillside Grading Ordinance applies');
-  if (fireZone && fireZone !== '') flags.push(`Fire Hazard Zone: ${fireZone}`);
-
-  return {
-    jurisdiction, address, rawZone, zoneBase,
-    heightDistrict: z.heightDistrict, generalPlan: gpLandUse,
-    specificPlan: specificPlanName, isHPOZ, isTOC, tocTier,
-    fireZone, isHillside, sb9: determineSB9(rawZone, isHPOZ, isTOC, fireZone),
-    permitted, physical, feasible: buildFeasibleText(zoneBase, isTOC, tocTier), flags,
-    hbu: {
-      zoning: rawZone + (z.heightDistrict ? `-${z.heightDistrict}` : '') + (gpLandUse !== '—' ? ` — General Plan: ${gpLandUse}` : ''),
-      permitted,
-      physical: physical + ' Confirm lot dimensions, utilities, topography.',
-      feasible: buildFeasibleText(zoneBase, isTOC, tocTier),
-      maxprod: buildMaxProd(zoneBase, isHPOZ, isTOC),
-      vacant: buildVacantConclusion(zoneBase, isTOC, isHillside),
-      improved: 'Continued use as currently improved, subject to confirmation of condition, functional utility, and market support.',
-    }
-  };
-}
-
+// Main handler
 exports.handler = async function(event) {
   if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method not allowed' };
+
   const googleKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!googleKey) return { statusCode: 500, body: JSON.stringify({ error: 'Google Maps API key not configured' }) };
 
@@ -174,21 +228,29 @@ exports.handler = async function(event) {
   const { address } = body;
   if (!address) return { statusCode: 400, body: JSON.stringify({ error: 'Address is required' }) };
 
+  // Step 1: Geocode address
   let lat, lng, formattedAddress;
   try {
-    const geoResp = await fetch(`${GOOGLE_GEOCODE}?address=${encodeURIComponent(address + ', Los Angeles County, CA')}&key=${googleKey}`);
+    const geoResp = await fetch(`${GOOGLE_GEOCODE}?address=${encodeURIComponent(address)}&key=${googleKey}`);
     const geoData = await geoResp.json();
-    if (!geoData.results || geoData.results.length === 0)
-      return { statusCode: 404, body: JSON.stringify({ error: 'Address not found. Please verify and try again.' }) };
-    lat = geoData.results[0].geometry.location.lat;
-    lng = geoData.results[0].geometry.location.lng;
+    if (!geoData.results || geoData.results.length === 0) {
+      return { statusCode: 404, body: JSON.stringify({ error: 'Address not found. Please verify the address and try again.' }) };
+    }
+    const loc = geoData.results[0].geometry.location;
+    lat = loc.lat;
+    lng = loc.lng;
     formattedAddress = geoData.results[0].formatted_address;
   } catch(e) {
     return { statusCode: 500, body: JSON.stringify({ error: 'Geocoding failed: ' + e.message }) };
   }
 
+  // Step 2: Detect jurisdiction
   const jurisdiction = await detectJurisdiction(lat, lng);
-  let zoning = null, generalPlan = null, toc = null, hpoz = null, specificPlan = null, fireHazard = null, hillside = null;
+
+  // Step 3: Query appropriate layers in parallel
+  let zoning = null, generalPlan = null, toc = null, hpoz = null,
+      specificPlan = null, fireHazard = null, hillside = null;
+
   const queries = [];
 
   if (jurisdiction === 'city_la') {
@@ -209,14 +271,30 @@ exports.handler = async function(event) {
     );
   }
 
-  await Promise.allSettled(queries);
+  try {
+    await Promise.allSettled(queries);
+  } catch(e) { /* individual query errors handled by allSettled */ }
 
-  const zoningCode = zoning ? (zoning.ZONE_CLASS || zoning.ZONE_SMRY || zoning.ZONE_CMPLT || zoning.ZONE_CODE || zoning.ZONE || null) : null;
-  const hbuData = buildHBUData(jurisdiction, zoningCode, generalPlan, toc, hpoz, specificPlan, fireHazard, hillside, formattedAddress);
+  // Extract key fields robustly across possible field name variations
+  const zoningCode = zoning
+    ? (zoning.ZONE_CLASS || zoning.ZONE_SMRY || zoning.ZONE_CMPLT || zoning.ZONE_CODE || zoning.ZONE || null)
+    : null;
+
+  // Step 4: Build HBU data
+  const hbuData = buildHBUData(
+    jurisdiction, zoningCode, generalPlan, toc, hpoz,
+    specificPlan, fireHazard, hillside, formattedAddress
+  );
 
   return {
     statusCode: 200,
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ success: true, address: formattedAddress, lat, lng, jurisdiction, ...hbuData })
+    body: JSON.stringify({
+      success: true,
+      address: formattedAddress,
+      lat, lng,
+      jurisdiction,
+      ...hbuData,
+    })
   };
 };
