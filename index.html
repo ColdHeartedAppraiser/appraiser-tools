@@ -146,6 +146,11 @@ input[type=file] { display: none; }
 .lnk-label { font-weight: 600; display: block; }
 .lnk-sub { font-size: 10.5px; color: var(--text3); display: block; margin-top: 1px; }
 .no-city { font-size: 12.5px; color: var(--text3); font-style: italic; }
+.ac-item { font-size:13px; padding:8px 12px; cursor:pointer; color:var(--text); border-bottom:0.5px solid var(--color-border-tertiary,var(--border)); line-height:1.4; }
+.ac-item:hover { background:var(--accent-bg); }
+.ac-item:last-child { border-bottom:none; }
+.ac-main { font-weight:500; display:block; }
+.ac-sub { font-size:11.5px; color:var(--text2); display:block; margin-top:1px; }
 .z-chip { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 7px 10px; }
 .z-chip-label { display: block; font-size: 10px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: .07em; margin-bottom: 2px; }
 .z-chip-val { display: block; font-size: 12.5px; font-weight: 600; color: var(--text); line-height: 1.3; }
@@ -518,7 +523,7 @@ function buildSidebar() {
   const hbuEl = document.createElement('div');
   hbuEl.className = 'sb-item' + (currentView==='hbu'?' active':'');
   hbuEl.textContent = 'HBU Research & Analysis';
-  hbuEl.onclick = () => { currentView='hbu'; buildSidebar(); renderContent(); };
+  hbuEl.onclick = () => { currentView='hbu'; hbuFieldVals={}; selectedCity=null; buildSidebar(); renderContent(); };
   nav.appendChild(hbuEl);
 }
 
@@ -667,8 +672,11 @@ function renderHBU(el) {
 <div class="section-label">Subject property</div>
 <div class="fgrid" style="margin-bottom:8px">
   <div class="fg full"><label>Property address</label>
-    <div style="display:flex;gap:8px">
-      <input type="text" id="h_address" placeholder="789 Hillside Ave, Altadena, CA" value="${hbuFieldVals.address||''}" style="flex:1">
+    <div style="display:flex;gap:8px;position:relative">
+      <div style="flex:1;position:relative">
+        <input type="text" id="h_address" placeholder="Start typing an address…" value="${hbuFieldVals.address||''}" style="width:100%" autocomplete="off" oninput="handleAddressInput(this.value)">
+        <div id="autocomplete-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:100;background:var(--surface);border:1px solid var(--border2);border-radius:var(--radius);box-shadow:0 4px 12px rgba(0,0,0,.1);max-height:220px;overflow-y:auto"></div>
+      </div>
       <button class="gen-btn" id="lookup-btn" onclick="runZoningLookup()" style="padding:6px 14px;white-space:nowrap;flex-shrink:0">
         <div class="spinner"></div><span class="btn-text">Look up zoning</span>
       </button>
@@ -889,6 +897,55 @@ function renderLinks() {
   title.textContent = 'Research links — ' + selectedCity.name;
   grid.innerHTML = selectedCity.links.map(l => `<a class="lnk" href="${l.url}" target="_blank"><span class="lnk-label">${l.label}</span><span class="lnk-sub">${l.sub}</span></a>`).join('');
 }
+
+
+let acTimer = null;
+let acResults = [];
+
+async function handleAddressInput(val) {
+  hbuFieldVals.address = val;
+  const drop = document.getElementById('autocomplete-dropdown');
+  if (!drop) return;
+  if (!val || val.length < 4) { drop.style.display='none'; return; }
+  clearTimeout(acTimer);
+  acTimer = setTimeout(async () => {
+    try {
+      const resp = await fetch('/.netlify/functions/places-autocomplete', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ input: val })
+      });
+      const data = await resp.json();
+      if (!data.predictions || !data.predictions.length) { drop.style.display='none'; return; }
+      acResults = data.predictions;
+      drop.innerHTML = data.predictions.map((p,i) =>
+        `<div class="ac-item" onclick="selectAddress(${i})">
+          <span class="ac-main">${p.structured_formatting?.main_text||p.description}</span>
+          <span class="ac-sub">${p.structured_formatting?.secondary_text||''}</span>
+        </div>`
+      ).join('');
+      drop.style.display = 'block';
+    } catch(e) { drop.style.display='none'; }
+  }, 280);
+}
+
+function selectAddress(idx) {
+  const p = acResults[idx];
+  if (!p) return;
+  const addr = p.description;
+  const input = document.getElementById('h_address');
+  if (input) { input.value = addr; hbuFieldVals.address = addr; }
+  const drop = document.getElementById('autocomplete-dropdown');
+  if (drop) drop.style.display = 'none';
+  runZoningLookup();
+}
+
+document.addEventListener('click', function(e) {
+  const drop = document.getElementById('autocomplete-dropdown');
+  if (drop && !drop.contains(e.target) && e.target.id !== 'h_address') {
+    drop.style.display = 'none';
+  }
+});
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 buildSidebar();
