@@ -1,0 +1,850 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GA Appraisals — Appraiser Tools</title>
+<style>
+:root {
+  --bg: #f5f4f1;
+  --surface: #ffffff;
+  --surface2: #f0efe9;
+  --border: #e0ddd6;
+  --border2: #c8c4bb;
+  --text: #1c1b18;
+  --text2: #58564f;
+  --text3: #98958d;
+  --accent: #1a5fa8;
+  --accent-bg: #edf3fb;
+  --accent-border: #b8d0ef;
+  --success: #2a7a4e;
+  --success-bg: #edf7f2;
+  --warn-bg: #fdf5e8;
+  --warn-text: #7a5200;
+  --warn-border: #e8c97a;
+  --radius: 7px;
+  --radius-lg: 11px;
+  --mono: 'Courier New', monospace;
+  --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --serif: 'Georgia', serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--sans); background: var(--bg); color: var(--text); min-height: 100vh; font-size: 13.5px; line-height: 1.5; }
+
+/* LAYOUT */
+.shell { display: flex; min-height: 100vh; }
+.sidebar { width: 220px; min-width: 220px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+.content { flex: 1; padding: 2rem 2.5rem; max-width: 820px; min-width: 0; }
+
+/* SIDEBAR */
+.sb-header { padding: 1.2rem 1rem 0.8rem; border-bottom: 1px solid var(--border); }
+.sb-logo { font-size: 11px; font-weight: 600; color: var(--text3); letter-spacing: .1em; text-transform: uppercase; display: block; margin-bottom: 2px; }
+.sb-title { font-size: 14px; font-weight: 600; color: var(--text); }
+.sb-cat { font-size: 10px; font-weight: 600; color: var(--text3); letter-spacing: .09em; text-transform: uppercase; padding: 12px 12px 4px; }
+.sb-item { font-size: 12.5px; color: var(--text2); padding: 6px 12px 6px 14px; cursor: pointer; border-left: 2px solid transparent; display: flex; align-items: center; gap: 6px; line-height: 1.3; }
+.sb-item:hover { color: var(--text); background: var(--surface2); }
+.sb-item.active { color: var(--accent); font-weight: 500; border-left-color: var(--accent); background: var(--accent-bg); }
+.sb-badge { font-size: 9px; padding: 1px 5px; border-radius: 4px; font-weight: 600; }
+.sb-badge.pdf { background: var(--warn-bg); color: var(--warn-text); border: 1px solid var(--warn-border); }
+
+/* CONTENT HEADER */
+.page-title { font-size: 20px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+.page-desc { font-size: 13px; color: var(--text2); margin-bottom: 1.5rem; line-height: 1.6; }
+.how-box { background: var(--accent-bg); border: 1px solid var(--accent-border); border-radius: var(--radius); padding: 10px 13px; font-size: 12.5px; color: var(--text2); line-height: 1.6; margin-bottom: 1.2rem; }
+.how-box strong { color: var(--accent); font-weight: 600; }
+
+/* FORMS */
+.section-label { font-size: 11px; font-weight: 600; color: var(--text3); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 8px; margin-top: 1.2rem; }
+.fgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.fg { display: flex; flex-direction: column; gap: 3px; }
+.fg.full { grid-column: 1 / -1; }
+label { font-size: 11.5px; color: var(--text2); }
+input[type=text], textarea, select {
+  font-family: var(--sans);
+  font-size: 12.5px;
+  width: 100%;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  outline: none;
+  transition: border-color .15s;
+}
+input[type=text]:focus, textarea:focus, select:focus { border-color: var(--accent); }
+textarea { resize: vertical; min-height: 52px; line-height: 1.5; }
+hr { border: none; border-top: 1px solid var(--border); margin: 1.2rem 0; }
+
+/* PROMPT BOX */
+.prompt-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.prompt-label { font-size: 11px; font-weight: 600; color: var(--text3); letter-spacing: .08em; text-transform: uppercase; }
+.copy-btn {
+  font-family: var(--sans);
+  font-size: 12px;
+  padding: 4px 12px;
+  cursor: pointer;
+  border-radius: var(--radius);
+  border: 1px solid var(--border2);
+  background: var(--surface);
+  color: var(--text2);
+  font-weight: 500;
+  transition: all .15s;
+}
+.copy-btn:hover { background: var(--surface2); border-color: var(--text3); }
+.copy-btn.ok { color: var(--success); border-color: var(--success); background: var(--success-bg); }
+.pbox {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text2);
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+/* TEST CARDS */
+.test-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+.test-card {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.test-num { font-size: 10px; font-weight: 600; color: var(--text3); letter-spacing: .08em; text-transform: uppercase; }
+.test-name { font-size: 13px; font-weight: 600; color: var(--text); margin-top: 1px; }
+.conc-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.conc-card { border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 12px 14px; }
+.conc-title { font-size: 12.5px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+
+/* HBU CITY SELECTOR */
+.city-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+.city-search-wrap { position: relative; }
+.city-list {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  margin-top: 4px;
+}
+.region-hdr {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text3);
+  padding: 7px 10px 3px;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+}
+.city-item {
+  font-size: 12.5px;
+  padding: 5px 10px;
+  cursor: pointer;
+  color: var(--text2);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+}
+.city-item:last-child { border-bottom: none; }
+.city-item:hover { background: var(--surface2); color: var(--text); }
+.city-item.active { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+.uninc-badge { font-size: 9px; padding: 1px 5px; border-radius: 4px; font-weight: 600; background: var(--warn-bg); color: var(--warn-text); border: 1px solid var(--warn-border); }
+
+/* LINKS BOX */
+.links-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+  margin-bottom: 1.2rem;
+}
+.links-title { font-size: 11.5px; font-weight: 600; color: var(--text2); margin-bottom: 8px; }
+.link-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 6px; }
+.lnk {
+  font-size: 12px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--accent);
+  text-decoration: none;
+  display: block;
+  line-height: 1.35;
+  background: var(--surface);
+  transition: all .15s;
+}
+.lnk:hover { background: var(--accent-bg); border-color: var(--accent-border); }
+.lnk-label { font-weight: 600; display: block; }
+.lnk-sub { font-size: 10.5px; color: var(--text3); display: block; margin-top: 1px; }
+.no-city { font-size: 12.5px; color: var(--text3); font-style: italic; }
+
+/* WELCOME */
+.welcome { max-width: 560px; }
+.welcome h2 { font-size: 17px; font-weight: 600; margin-bottom: 10px; color: var(--text); }
+.welcome p { font-size: 13.5px; color: var(--text2); line-height: 1.7; margin-bottom: 10px; }
+.welcome ul { padding-left: 1.2rem; color: var(--text2); font-size: 13.5px; line-height: 2; }
+</style>
+</head>
+<body>
+
+<div class="shell">
+  <div class="sidebar">
+    <div class="sb-header">
+      <span class="sb-logo">GA Appraisals</span>
+      <span class="sb-title">Appraiser Tools</span>
+    </div>
+    <div id="sb-nav"></div>
+  </div>
+  <div class="content" id="content">
+    <div class="welcome">
+      <h2>Welcome to GA Appraisals Tools</h2>
+      <p>Select a tool from the sidebar to get started. Each tool generates a ready-to-paste Claude prompt based on your assignment data.</p>
+      <p><strong>How to use:</strong></p>
+      <ul>
+        <li>Fill in the assignment fields</li>
+        <li>Click <strong>Copy prompt</strong></li>
+        <li>Open <a href="https://claude.ai" target="_blank" style="color:var(--accent)">claude.ai</a> in a new tab</li>
+        <li>Paste the prompt and hit enter</li>
+        <li>Copy the output into Total</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── DATA ───────────────────────────────────────────────────────────────────
+
+const ASSESSOR = {label:'LA County Assessor', sub:'APN lookup & ownership', url:'https://assessor.lacounty.gov'};
+const FEMA     = {label:'FEMA Flood Map',      sub:'Flood & hazard zones',   url:'https://msc.fema.gov/portal/home'};
+const ZNET     = {label:'ZNet (LA County)',    sub:'Zoning & general plan',  url:'https://znet.lacounty.gov'};
+const LA_PLAN  = {label:'LA County Planning',  sub:'Zoning & land use',      url:'https://planning.lacounty.gov'};
+const LA_PRMT  = {label:'County Permits',      sub:'Building permits',       url:'https://acpermits.dpw.lacounty.gov'};
+const ZIMAS    = {label:'ZIMAS',               sub:'Zoning info & map',      url:'https://zimas.lacity.org'};
+const LA_CITY_PLAN = {label:'LA City Planning', sub:'Planning & zoning',     url:'https://planning.lacity.gov'};
+const LADBS    = {label:'LADBS Permits',       sub:'City permit portal',     url:'https://www.ladbsservices2.lacity.org'};
+
+function mc(slug){ return {label:'Municipal Code', sub:'Zoning ordinance', url:'https://library.municode.com/ca/'+slug}; }
+function pl(label,url){ return {label, sub:'Planning & zoning', url}; }
+function pm(label,url){ return {label, sub:'Building permits',  url}; }
+
+const UNINC_BASE = [ASSESSOR, ZNET, LA_PLAN, LA_PRMT, mc('los_angeles_county'), FEMA];
+const CITY_LA    = [ASSESSOR, ZIMAS, LA_CITY_PLAN, LADBS, mc('los_angeles'), FEMA];
+
+const REGIONS = [
+{label:'Unincorporated LA County', cities:[
+  {id:'uninc_altadena',   name:'Altadena',              uninc:true, links:UNINC_BASE},
+  {id:'uninc_east_la',    name:'East Los Angeles',      uninc:true, links:UNINC_BASE},
+  {id:'uninc_hacienda',   name:'Hacienda Heights',      uninc:true, links:UNINC_BASE},
+  {id:'uninc_rowland',    name:'Rowland Heights',       uninc:true, links:UNINC_BASE},
+  {id:'uninc_valinda',    name:'Valinda',               uninc:true, links:UNINC_BASE},
+  {id:'uninc_west_whit',  name:'West Whittier',         uninc:true, links:UNINC_BASE},
+  {id:'uninc_florence',   name:'Florence-Firestone',    uninc:true, links:UNINC_BASE},
+  {id:'uninc_lennox',     name:'Lennox',                uninc:true, links:UNINC_BASE},
+  {id:'uninc_la_cres',    name:'La Crescenta-Montrose', uninc:true, links:UNINC_BASE},
+  {id:'uninc_acton',      name:'Acton',                 uninc:true, links:UNINC_BASE},
+  {id:'uninc_agua_dulce', name:'Agua Dulce',            uninc:true, links:UNINC_BASE},
+  {id:'uninc_malibu_jct', name:'Malibu Junction',       uninc:true, links:UNINC_BASE},
+  {id:'uninc_general',    name:'Other Unincorporated',  uninc:true, links:UNINC_BASE},
+]},
+{label:'City of Los Angeles', cities:[
+  {id:'city_la', name:'Los Angeles (City)', links:CITY_LA},
+]},
+{label:'San Gabriel Valley', cities:[
+  {id:'alhambra',      name:'Alhambra',           links:[ASSESSOR, pl('Alhambra Planning','https://www.cityofalhambra.org/departments/community-development/planning'),       mc('alhambra'),       FEMA]},
+  {id:'arcadia',       name:'Arcadia',            links:[ASSESSOR, pl('Arcadia Planning','https://www.arcadiaca.gov/government/city-departments/community-development/planning'), mc('arcadia'),    FEMA]},
+  {id:'azusa',         name:'Azusa',              links:[ASSESSOR, pl('Azusa Planning','https://www.azusaca.gov/departments/community-development/planning'),                  mc('azusa'),          FEMA]},
+  {id:'baldwin_park',  name:'Baldwin Park',       links:[ASSESSOR, pl('Baldwin Park Planning','https://www.baldwinpark.com/departments/community-development/planning'),       mc('baldwin_park'),   FEMA]},
+  {id:'bradbury',      name:'Bradbury',           links:[ASSESSOR, pl('Bradbury City Hall','https://www.cityofbradbury.org'),                                                   mc('bradbury'),       FEMA]},
+  {id:'claremont',     name:'Claremont',          links:[ASSESSOR, pl('Claremont Planning','https://www.ci.claremont.ca.us/departments/community-development/planning'),       mc('claremont'),      FEMA]},
+  {id:'covina',        name:'Covina',             links:[ASSESSOR, pl('Covina Planning','https://covinaca.gov/departments/community-development/planning-zoning'),             mc('covina'),         FEMA]},
+  {id:'diamond_bar',   name:'Diamond Bar',        links:[ASSESSOR, pl('Diamond Bar Planning','https://www.diamondbarca.gov/departments/community-development/planning'),       mc('diamond_bar'),    FEMA]},
+  {id:'duarte',        name:'Duarte',             links:[ASSESSOR, pl('Duarte Planning','https://accessduarte.com/city-hall/community-development/planning'),                  mc('duarte'),         FEMA]},
+  {id:'el_monte',      name:'El Monte',           links:[ASSESSOR, pl('El Monte Planning','https://www.elmonteca.gov/departments/community_development/planning_division.php'),mc('el_monte'),       FEMA]},
+  {id:'glendora',      name:'Glendora',           links:[ASSESSOR, pl('Glendora Planning','https://www.cityofglendora.org/departments/community-development/planning'),        mc('glendora'),       FEMA]},
+  {id:'industry',      name:'Industry',           links:[ASSESSOR, pl('City of Industry','https://www.cityofindustry.org'),                                                     mc('industry'),       FEMA]},
+  {id:'irwindale',     name:'Irwindale',          links:[ASSESSOR, pl('Irwindale Planning','https://www.irwindaleca.gov/planning'),                                             mc('irwindale'),      FEMA]},
+  {id:'la_canada',     name:'La Cañada Flintridge',links:[ASSESSOR,pl('LCF Planning','https://www.lcf.ca.gov/government/departments/community-development'),                   mc('la_canada_flintridge'), FEMA]},
+  {id:'la_puente',     name:'La Puente',          links:[ASSESSOR, pl('La Puente Planning','https://www.lapuente.net/departments/community-development'),                       mc('la_puente'),      FEMA]},
+  {id:'la_verne',      name:'La Verne',           links:[ASSESSOR, pl('La Verne Planning','https://www.laverne.org/departments/community-development/planning'),                mc('la_verne'),       FEMA]},
+  {id:'monrovia',      name:'Monrovia',           links:[ASSESSOR, pl('Monrovia Planning','https://www.ci.monrovia.ca.us/departments/community-development/planning-division'), mc('monrovia'),       FEMA]},
+  {id:'monterey_park', name:'Monterey Park',      links:[ASSESSOR, pl('Monterey Park Planning','https://www.montereypark.ca.gov/departments/planning'),                         mc('monterey_park'),  FEMA]},
+  {id:'pasadena',      name:'Pasadena',           links:[ASSESSOR, pl('Pasadena Planning','https://www.cityofpasadena.net/planning/'), {label:'Pasadena GIS',sub:'Parcel & zoning map',url:'https://gis.cityofpasadena.net/maps/pasadena/'}, pm('Pasadena Permits','https://aca.accela.com/pasadena'), mc('pasadena'), FEMA]},
+  {id:'pomona',        name:'Pomona',             links:[ASSESSOR, pl('Pomona Planning','https://www.ci.pomona.ca.us/index.php/community-development-planning'),                mc('pomona'),         FEMA]},
+  {id:'rosemead',      name:'Rosemead',           links:[ASSESSOR, pl('Rosemead Planning','https://www.cityofrosemead.org/government/departments/community-development/planning'), mc('rosemead'),  FEMA]},
+  {id:'san_dimas',     name:'San Dimas',          links:[ASSESSOR, pl('San Dimas Planning','https://www.cityofsandimas.com/departments/community-development/planning'),        mc('san_dimas'),      FEMA]},
+  {id:'san_gabriel',   name:'San Gabriel',        links:[ASSESSOR, pl('San Gabriel Planning','https://www.sangabrielcity.com/departments/community_development/planning/index.php'), mc('san_gabriel'), FEMA]},
+  {id:'san_marino',    name:'San Marino',         links:[ASSESSOR, pl('San Marino Planning','https://www.cityofsanmarino.org/departments/planning_division/index.php'),         mc('san_marino'),     FEMA]},
+  {id:'sierra_madre',  name:'Sierra Madre',       links:[ASSESSOR, pl('Sierra Madre Planning','https://cityofsierramadre.com/departments/community-development'),               mc('sierra_madre'),   FEMA]},
+  {id:'s_el_monte',    name:'South El Monte',     links:[ASSESSOR, pl('S. El Monte Planning','https://www.cityofsouthelmonte.org/departments/community-development'),           mc('south_el_monte'), FEMA]},
+  {id:'temple_city',   name:'Temple City',        links:[ASSESSOR, pl('Temple City Planning','https://www.templecity.us/178/Planning'),                                          mc('temple_city'),    FEMA]},
+  {id:'walnut',        name:'Walnut',             links:[ASSESSOR, pl('Walnut Planning','https://www.walnutca.gov/departments/planning'),                                        mc('walnut'),         FEMA]},
+  {id:'west_covina',   name:'West Covina',        links:[ASSESSOR, pl('West Covina Planning','https://www.westcovina.org/departments/planning'),                                 mc('west_covina'),    FEMA]},
+  {id:'whittier',      name:'Whittier',           links:[ASSESSOR, pl('Whittier Planning','https://www.cityofwhittier.org/departments/planning-building'),                       mc('whittier'),       FEMA]},
+]},
+{label:'Foothills / Verdugos', cities:[
+  {id:'burbank',   name:'Burbank',  links:[ASSESSOR, pl('Burbank Planning','https://www.burbankca.gov/departments/community-development/planning'),   mc('burbank'),  FEMA]},
+  {id:'glendale',  name:'Glendale', links:[ASSESSOR, pl('Glendale Planning','https://www.glendaleca.gov/government/departments/community-development/planning'), mc('glendale'), FEMA]},
+  {id:'la_canada', name:'La Cañada Flintridge', links:[ASSESSOR, pl('LCF Planning','https://www.lcf.ca.gov/government/departments/community-development'), mc('la_canada_flintridge'), FEMA]},
+]},
+{label:'Westside / Central', cities:[
+  {id:'beverly_hills', name:'Beverly Hills', links:[ASSESSOR, pl('BH Planning','https://www.beverlyhills.org/departments/communitydevelopment/planningdivision/'), mc('beverly_hills'), FEMA]},
+  {id:'calabasas',     name:'Calabasas',     links:[ASSESSOR, pl('Calabasas Planning','https://www.cityofcalabasas.com/departments/community-development/planning'), mc('calabasas'), FEMA]},
+  {id:'culver_city',   name:'Culver City',   links:[ASSESSOR, pl('Culver City Planning','https://www.culvercity.org/services/planning-and-development'), mc('culver_city'), FEMA]},
+  {id:'el_segundo',    name:'El Segundo',    links:[ASSESSOR, pl('El Segundo Planning','https://www.elsegundo.org/departments/planning-and-building-safety'), mc('el_segundo'), FEMA]},
+  {id:'hidden_hills',  name:'Hidden Hills',  links:[ASSESSOR, pl('Hidden Hills','https://www.hiddenhillscity.org'), mc('hidden_hills'), FEMA]},
+  {id:'malibu',        name:'Malibu',        links:[ASSESSOR, pl('Malibu Planning','https://www.malibucity.org/planning'), mc('malibu'), FEMA]},
+  {id:'santa_monica',  name:'Santa Monica',  links:[ASSESSOR, pl('Santa Monica Planning','https://www.santamonica.gov/departments/community-development/planning'), mc('santa_monica'), FEMA]},
+  {id:'west_hollywood',name:'West Hollywood',links:[ASSESSOR, pl('WeHo Planning','https://www.weho.org/community-development/planning'), mc('west_hollywood'), FEMA]},
+]},
+{label:'South Bay / Harbor', cities:[
+  {id:'carson',         name:'Carson',          links:[ASSESSOR, pl('Carson Planning','https://www.carson.ca.us/departments/planning'), mc('carson'), FEMA]},
+  {id:'compton',        name:'Compton',         links:[ASSESSOR, pl('Compton Planning','https://www.comptoncity.org/departments/community-development/planning'), mc('compton'), FEMA]},
+  {id:'gardena',        name:'Gardena',         links:[ASSESSOR, pl('Gardena Planning','https://www.cityofgardena.org/departments/planning'), mc('gardena'), FEMA]},
+  {id:'hawthorne',      name:'Hawthorne',       links:[ASSESSOR, pl('Hawthorne Planning','https://www.cityofhawthorne.org/departments/planning'), mc('hawthorne'), FEMA]},
+  {id:'hermosa_beach',  name:'Hermosa Beach',   links:[ASSESSOR, pl('Hermosa Beach Planning','https://www.hermosabeach.gov/departments/community-development'), mc('hermosa_beach'), FEMA]},
+  {id:'inglewood',      name:'Inglewood',       links:[ASSESSOR, pl('Inglewood Planning','https://www.cityofinglewood.org/departments/community-development/planning'), mc('inglewood'), FEMA]},
+  {id:'lawndale',       name:'Lawndale',        links:[ASSESSOR, pl('Lawndale Planning','https://www.lawndalecity.org/departments/community-development/planning'), mc('lawndale'), FEMA]},
+  {id:'lomita',         name:'Lomita',          links:[ASSESSOR, pl('Lomita Planning','https://www.lomita-ca.gov/departments/planning'), mc('lomita'), FEMA]},
+  {id:'long_beach',     name:'Long Beach',      links:[ASSESSOR, pl('Long Beach Planning','https://www.longbeach.gov/lbds/planning/'), mc('long_beach'), FEMA]},
+  {id:'manhattan_beach',name:'Manhattan Beach', links:[ASSESSOR, pl('MB Planning','https://www.citymb.info/departments/community-development/planning'), mc('manhattan_beach'), FEMA]},
+  {id:'pv_estates',     name:'Palos Verdes Estates', links:[ASSESSOR, pl('PVE Planning','https://www.pvestates.org/planning'), mc('palos_verdes_estates'), FEMA]},
+  {id:'rancho_pv',      name:'Rancho Palos Verdes',  links:[ASSESSOR, pl('RPV Planning','https://www.rpvca.gov/261/Planning'), mc('rancho_palos_verdes'), FEMA]},
+  {id:'redondo_beach',  name:'Redondo Beach',   links:[ASSESSOR, pl('Redondo Beach Planning','https://www.redondo.org/depts/planning/default.asp'), mc('redondo_beach'), FEMA]},
+  {id:'rolling_hills',  name:'Rolling Hills',   links:[ASSESSOR, pl('Rolling Hills Planning','https://www.rolling-hills.org/government/planning/index.php'), mc('rolling_hills'), FEMA]},
+  {id:'rhe',            name:'Rolling Hills Estates', links:[ASSESSOR, pl('RHE Planning','https://www.rhe.org/departments/planning'), mc('rolling_hills_estates'), FEMA]},
+  {id:'signal_hill',    name:'Signal Hill',     links:[ASSESSOR, pl('Signal Hill Planning','https://www.cityofsignalhill.org/212/Planning'), mc('signal_hill'), FEMA]},
+  {id:'torrance',       name:'Torrance',        links:[ASSESSOR, pl('Torrance Planning','https://www.torranceca.gov/departments/community-development/planning'), mc('torrance'), FEMA]},
+]},
+{label:'Gateway / Southeast', cities:[
+  {id:'artesia',        name:'Artesia',         links:[ASSESSOR, pl('Artesia Planning','https://www.cityofartesia.us/departments/community-development'), mc('artesia'), FEMA]},
+  {id:'bell',           name:'Bell',            links:[ASSESSOR, pl('Bell Planning','https://www.cityofbell.org/departments/community-development/planning'), mc('bell'), FEMA]},
+  {id:'bell_gardens',   name:'Bell Gardens',    links:[ASSESSOR, pl('Bell Gardens Planning','https://www.bellgardens.org/departments/community-development'), mc('bell_gardens'), FEMA]},
+  {id:'bellflower',     name:'Bellflower',      links:[ASSESSOR, pl('Bellflower Planning','https://www.bellflower.org/departments/community-development/planning'), mc('bellflower'), FEMA]},
+  {id:'cerritos',       name:'Cerritos',        links:[ASSESSOR, pl('Cerritos Planning','https://www.cerritos.us/planning'), mc('cerritos'), FEMA]},
+  {id:'commerce',       name:'Commerce',        links:[ASSESSOR, pl('Commerce Planning','https://www.ci.commerce.ca.us/departments/planning'), mc('commerce'), FEMA]},
+  {id:'cudahy',         name:'Cudahy',          links:[ASSESSOR, pl('Cudahy Planning','https://www.cityofcudahy.com/planning'), mc('cudahy'), FEMA]},
+  {id:'downey',         name:'Downey',          links:[ASSESSOR, pl('Downey Planning','https://www.downeyca.org/government/departments/community-development/planning-division'), mc('downey'), FEMA]},
+  {id:'huntington_park',name:'Huntington Park', links:[ASSESSOR, pl('HP Planning','https://www.hpca.gov/200/Community-Development'), mc('huntington_park'), FEMA]},
+  {id:'la_habra_hts',   name:'La Habra Heights',links:[ASSESSOR, pl('LHH Planning','https://www.lahabraheights.com/departments/planning'), mc('la_habra_heights'), FEMA]},
+  {id:'la_mirada',      name:'La Mirada',       links:[ASSESSOR, pl('La Mirada Planning','https://www.cityoflamirada.org/departments/community-development/planning'), mc('la_mirada'), FEMA]},
+  {id:'lakewood',       name:'Lakewood',        links:[ASSESSOR, pl('Lakewood Planning','https://www.lakewoodcity.org/government/city-departments/community-development/planning'), mc('lakewood'), FEMA]},
+  {id:'lynwood',        name:'Lynwood',         links:[ASSESSOR, pl('Lynwood Planning','https://www.lynwood.ca.us/departments/community-development/planning'), mc('lynwood'), FEMA]},
+  {id:'maywood',        name:'Maywood',         links:[ASSESSOR, pl('Maywood Planning','https://www.cityofmaywood.gov/planning'), mc('maywood'), FEMA]},
+  {id:'montebello',     name:'Montebello',      links:[ASSESSOR, pl('Montebello Planning','https://www.cityofmontebello.com/departments/community-development/planning'), mc('montebello'), FEMA]},
+  {id:'norwalk',        name:'Norwalk',         links:[ASSESSOR, pl('Norwalk Planning','https://www.norwalkca.gov/departments/community-development/planning'), mc('norwalk'), FEMA]},
+  {id:'paramount',      name:'Paramount',       links:[ASSESSOR, pl('Paramount Planning','https://www.paramountcity.com/government/departments/community-development'), mc('paramount'), FEMA]},
+  {id:'pico_rivera',    name:'Pico Rivera',     links:[ASSESSOR, pl('Pico Rivera Planning','https://www.pico-rivera.org/departments/community-development/planning'), mc('pico_rivera'), FEMA]},
+  {id:'sfe_springs',    name:'Santa Fe Springs', links:[ASSESSOR, pl('SFS Planning','https://www.santafesprings.org/planning'), mc('santa_fe_springs'), FEMA]},
+  {id:'south_gate',     name:'South Gate',      links:[ASSESSOR, pl('South Gate Planning','https://www.cityofsouthgate.org/departments/community-development/planning'), mc('south_gate'), FEMA]},
+  {id:'vernon',         name:'Vernon',          links:[ASSESSOR, pl('Vernon Planning','https://www.cityofvernon.org/departments/community-services-water-and-development-services'), mc('vernon'), FEMA]},
+]},
+{label:'Antelope Valley / North', cities:[
+  {id:'lancaster',     name:'Lancaster',    links:[ASSESSOR, pl('Lancaster Planning','https://www.cityoflancasterca.org/departments/planning-and-natural-resources'), mc('lancaster'), FEMA]},
+  {id:'palmdale',      name:'Palmdale',     links:[ASSESSOR, pl('Palmdale Planning','https://www.cityofpalmdale.org/planning'), mc('palmdale'), FEMA]},
+  {id:'santa_clarita', name:'Santa Clarita',links:[ASSESSOR, pl('Santa Clarita Planning','https://www.santa-clarita.com/city-hall/city-departments/community-development/planning'), mc('santa_clarita'), FEMA]},
+]},
+{label:'Conejo / Las Virgenes', cities:[
+  {id:'agoura_hills',   name:'Agoura Hills',   links:[ASSESSOR, pl('Agoura Hills Planning','https://www.agourahillscity.org/government/departments/planning'), mc('agoura_hills'), FEMA]},
+  {id:'westlake_village',name:'Westlake Village',links:[ASSESSOR, pl('Westlake Village Planning','https://www.wlv.org/index.aspx?NID=147'), mc('westlake_village'), FEMA]},
+]},
+];
+
+// ─── PROMPT TEMPLATES ───────────────────────────────────────────────────────
+
+const TEMPLATES = [
+{id:'neighborhood', label:'Neighborhood description', cat:'Core Narratives', type:'fields',
+ desc:'Concise 75–100 word neighborhood description for any SFR assignment.',
+ fields:[
+  {id:'city',      label:'City / community',              ph:'Pasadena'},
+  {id:'propTypes', label:'Predominant property types',    ph:'single-family residences, 1920s–1960s bungalows'},
+  {id:'valueLow',  label:'Value range — low',             ph:'$850,000'},
+  {id:'valueHigh', label:'Value range — high',            ph:'$1,600,000'},
+  {id:'glaRange',  label:'GLA range',                     ph:'1,100–2,800 sf'},
+  {id:'lotRange',  label:'Lot size range',                ph:'5,000–9,000 sf'},
+  {id:'amenities', label:'Nearby amenities / access',     ph:'Old Town, Rose Bowl, Metro Gold Line', full:true},
+  {id:'trend',     label:'Market trend',                  ph:'stable to slightly appreciating'},
+ ],
+ prompt: f => `You are a licensed real estate appraiser writing narrative for a non-lender appraisal report.
+
+Task: Write a neighborhood description.
+
+Data:
+- Community: ${f.city||'[city]'}
+- Predominant property types: ${f.propTypes||'[types]'}
+- Value range: ${f.valueLow||'[low]'} to ${f.valueHigh||'[high]'}
+- GLA range: ${f.glaRange||'[GLA]'}
+- Lot size range: ${f.lotRange||'[lots]'}
+- Nearby amenities: ${f.amenities||'[amenities]'}
+- Market trend: ${f.trend||'[trend]'}
+
+Requirements:
+- Length: 75–100 words maximum
+- Continuous paragraph prose only — no headers, bullets, or markdown
+- Objective, formal appraisal language — no marketing language
+- Do not use first person
+- Output the paragraph only`
+},
+{id:'subject', label:'Subject description', cat:'Core Narratives', type:'pdf',
+ desc:'Upload Total page 1 as a PDF. Claude extracts and writes the subject description.',
+ how:'In Total, print/export page 1 of your report as a PDF. Open a new Claude chat, attach the PDF, then paste this prompt.',
+ prompt: () => `You are a licensed real estate appraiser writing narrative for a non-lender appraisal report.
+
+I have attached page 1 of a completed appraisal form (Total appraisal software). Using only the data shown on the form, write a subject property description.
+
+Requirements:
+- Length: 75–100 words maximum
+- Continuous paragraph prose only — no headers, bullets, or markdown
+- Objective, factual, formal appraisal language
+- Do not use first person
+- Cover: improvement type, year built, GLA, lot size, bedroom/bath count, garage, condition, quality, and any notable features visible in the form
+- Do not invent or assume any data not shown on the form
+- Output the paragraph only`
+},
+{id:'estate', label:'Estate / date of death', cat:'Assignment-Specific', type:'fields',
+ desc:'Assignment conditions paragraph for estate and date of death appraisals.',
+ fields:[
+  {id:'decedent',    label:'Decedent name',         ph:'John A. Smith'},
+  {id:'dod',         label:'Date of death',          ph:'November 3, 2024'},
+  {id:'address',     label:'Property address',       ph:'123 Elm St, Arcadia, CA'},
+  {id:'client',      label:'Client / executor',      ph:'Mary Smith, Executor'},
+  {id:'attorney',    label:'Attorney / firm',        ph:'Johnson & Associates'},
+  {id:'ownership',   label:'Ownership interest',     ph:'fee simple'},
+  {id:'intendedUse', label:'Intended use',           ph:'IRS estate tax purposes'},
+ ],
+ prompt: f => `You are a licensed real estate appraiser writing narrative for a non-lender appraisal report.
+
+Task: Write the assignment conditions paragraph for an estate / date of death appraisal.
+
+Data:
+- Decedent: ${f.decedent||'[name]'}
+- Date of death / effective date: ${f.dod||'[date]'}
+- Property: ${f.address||'[address]'}
+- Client: ${f.client||'[client]'}
+- Attorney / firm: ${f.attorney||'[attorney]'}
+- Ownership interest: ${f.ownership||'fee simple'}
+- Intended use: ${f.intendedUse||'[use]'}
+
+Requirements:
+- Length: 100–125 words
+- Continuous paragraph prose only — no headers, bullets, or markdown
+- Formal, professional appraisal and legal language
+- Do not use first person
+- Cover: purpose, effective date, client, intended users, intended use, ownership interest, and that the opinion reflects market conditions as of the date of death
+- Output the paragraph only`
+},
+{id:'divorce', label:'Divorce / IRMO', cat:'Assignment-Specific', type:'fields',
+ desc:'Assignment conditions for dissolution of marriage appraisals.',
+ fields:[
+  {id:'caseName',   label:'Case name',             ph:'IRMO Smith'},
+  {id:'caseNum',    label:'Case number',            ph:'24STFL12345'},
+  {id:'court',      label:'Court',                  ph:'Los Angeles Superior Court'},
+  {id:'address',    label:'Property address',       ph:'456 Oak Dr, Pasadena, CA'},
+  {id:'client',     label:'Client / retaining party', ph:'Jane Smith'},
+  {id:'attorney',   label:'Retaining attorney',     ph:'Anderson Family Law Group'},
+  {id:'effectDate', label:'Effective date',         ph:'February 1, 2025'},
+  {id:'ownership',  label:'Ownership interest',     ph:'fee simple — community property'},
+ ],
+ prompt: f => `You are a licensed real estate appraiser writing narrative for a non-lender appraisal report.
+
+Task: Write the assignment conditions paragraph for a dissolution of marriage (IRMO) appraisal.
+
+Data:
+- Case: ${f.caseName||'[case]'} — ${f.caseNum||'[number]'}
+- Court: ${f.court||'[court]'}
+- Property: ${f.address||'[address]'}
+- Client / retaining party: ${f.client||'[client]'}
+- Retaining attorney: ${f.attorney||'[attorney]'}
+- Effective date: ${f.effectDate||'[date]'}
+- Ownership interest: ${f.ownership||'[ownership]'}
+
+Requirements:
+- Length: 100–125 words
+- Continuous paragraph prose only — no headers, bullets, or markdown
+- Formal, objective, legal-standard appraisal language
+- Do not use first person
+- Cover: nature of assignment, case reference, court, retaining party, intended use, effective date, ownership interest, appraiser independence from both parties
+- Output the paragraph only`
+},
+{id:'casualty', label:'Casualty loss (IRS)', cat:'Assignment-Specific', type:'fields',
+ desc:'Assignment narrative for IRS casualty loss appraisals — Eaton Fire, Palisades Fire, etc.',
+ fields:[
+  {id:'address',      label:'Property address',       ph:'789 Hillside Ave, Altadena, CA'},
+  {id:'disaster',     label:'Type of disaster',       ph:'Eaton Fire'},
+  {id:'disDate',      label:'Disaster date',          ph:'January 7, 2025'},
+  {id:'client',       label:'Client name',            ph:'Robert & Linda Chen'},
+  {id:'preCondition', label:'Pre-event condition',    ph:'C3 average; 2,100 sf SFR, fully improved', full:true},
+  {id:'postCondition',label:'Post-event condition',   ph:'total loss — vacant lot remaining', full:true},
+  {id:'preValue',     label:'Pre-event value',        ph:'$1,250,000'},
+  {id:'postValue',    label:'Post-event value',       ph:'$380,000'},
+  {id:'diminution',   label:'Diminution in value',    ph:'$870,000'},
+ ],
+ prompt: f => `You are a licensed real estate appraiser writing narrative for a non-lender appraisal report prepared for IRS casualty loss purposes.
+
+Task: Write the assignment conditions paragraph.
+
+Data:
+- Property: ${f.address||'[address]'}
+- Disaster: ${f.disaster||'[disaster]'} — ${f.disDate||'[date]'}
+- Client: ${f.client||'[client]'}
+- Pre-event condition: ${f.preCondition||'[condition]'}
+- Post-event condition: ${f.postCondition||'[condition]'}
+- Pre-event value: ${f.preValue||'[value]'}
+- Post-event value: ${f.postValue||'[value]'}
+- Diminution: ${f.diminution||'[amount]'}
+
+Requirements:
+- Length: 150–175 words
+- Continuous paragraph prose only — no headers, bullets, or markdown
+- Formal IRS-compliant appraisal language — do not use first person
+- Reference IRC Section 165, two effective dates (immediately before and after the event), and that this is a qualified appraisal by a qualified appraiser per IRS Revenue Procedure requirements
+- Output the paragraph only`
+},
+{id:'litigation', label:'Litigation support', cat:'Assignment-Specific', type:'fields',
+ desc:'Assignment conditions for expert witness and litigation appraisals.',
+ fields:[
+  {id:'caseType',   label:'Type of litigation',      ph:'partition action / property value dispute'},
+  {id:'caseName',   label:'Case name',               ph:'Smith v. Jones'},
+  {id:'caseNum',    label:'Case number',             ph:'24STCV09876'},
+  {id:'court',      label:'Court',                   ph:'Los Angeles Superior Court'},
+  {id:'address',    label:'Property address',        ph:'321 Maple Ct, Laguna Niguel, CA'},
+  {id:'client',     label:'Client / retaining party',ph:'Michael Green, plaintiff'},
+  {id:'attorney',   label:'Retaining attorney',      ph:'Harrison & Fox LLP'},
+  {id:'effectDate', label:'Effective date',          ph:'March 1, 2024'},
+  {id:'issue',      label:'Issue in dispute',        ph:'fair market value for equitable division', full:true},
+ ],
+ prompt: f => `You are a licensed real estate appraiser writing narrative for a non-lender appraisal report prepared in connection with litigation.
+
+Task: Write the assignment conditions paragraph.
+
+Data:
+- Litigation type: ${f.caseType||'[type]'}
+- Case: ${f.caseName||'[case]'} — ${f.caseNum||'[number]'}
+- Court: ${f.court||'[court]'}
+- Property: ${f.address||'[address]'}
+- Client / retaining party: ${f.client||'[client]'}
+- Retaining attorney: ${f.attorney||'[attorney]'}
+- Effective date: ${f.effectDate||'[date]'}
+- Issue in dispute: ${f.issue||'[issue]'}
+
+Requirements:
+- Length: 125–150 words
+- Continuous paragraph prose only — no headers, bullets, or markdown
+- Formal, expert witness quality language — do not use first person
+- Cover: nature of litigation, case reference, retaining party and counsel, the appraisal issue, effective date, statement that opinion is rendered without advocacy for either party, and note that the appraiser may be called to provide expert testimony
+- Output the paragraph only`
+},
+{id:'sca', label:'Sales comparison approach', cat:'Approach Sections', type:'pdf',
+ desc:'Upload your comp grid pages as PDF. Claude writes the sales comparison narrative.',
+ how:'In Total, export your sales comparison grid pages as a PDF. Open a new Claude chat, attach the PDF, then paste this prompt.',
+ prompt: () => `You are a licensed real estate appraiser writing narrative for a non-lender appraisal report.
+
+I have attached the sales comparison grid pages from a completed appraisal (Total appraisal software). Using only the data shown in the grid, write the sales comparison approach narrative.
+
+Requirements:
+- Length: 150–200 words
+- Continuous paragraph prose only — no headers, bullets, or markdown
+- Formal appraisal language — do not use first person
+- Cover: market area and search parameters, number of sales reviewed and selected, date range and proximity of comps, primary unit of comparison, adjustment methodology, and a brief summary of the adjusted value range
+- Do not invent or assume data not shown in the grid
+- Output the paragraph only`
+},
+{id:'recon', label:'Reconciliation', cat:'Approach Sections', type:'pdf',
+ desc:'Upload your final value / reconciliation page as PDF. Claude writes the reconciliation paragraph.',
+ how:'Export your reconciliation or final value page from Total as a PDF. Open a new Claude chat, attach the PDF, then paste this prompt.',
+ prompt: () => `You are a licensed real estate appraiser writing narrative for a non-lender appraisal report.
+
+I have attached the reconciliation and final value section from a completed appraisal (Total appraisal software). Using only the data shown, write the reconciliation narrative and final value conclusion.
+
+Requirements:
+- Length: 100–150 words
+- Continuous paragraph prose only — no headers, bullets, or markdown
+- Formal, authoritative appraisal language — do not use first person
+- Cover: approaches developed, relative reliability of each, weighting rationale, and a clear unambiguous final value statement including dollar amount and effective date
+- The final sentence must state the concluded value clearly
+- Do not invent or assume data not shown
+- Output the paragraph only`
+},
+];
+
+// ─── APP STATE ───────────────────────────────────────────────────────────────
+
+let currentView = 'welcome'; // 'welcome' | template id | 'hbu'
+let fieldVals = {};
+let selectedCity = null;
+
+// ─── SIDEBAR ─────────────────────────────────────────────────────────────────
+
+function buildSidebar() {
+  const nav = document.getElementById('sb-nav');
+  nav.innerHTML = '';
+
+  // Prompt templates by category
+  const cats = [...new Set(TEMPLATES.map(t => t.cat))];
+  cats.forEach(cat => {
+    const ch = document.createElement('div');
+    ch.className = 'sb-cat'; ch.textContent = cat;
+    nav.appendChild(ch);
+    TEMPLATES.filter(t => t.cat === cat).forEach(t => {
+      const el = document.createElement('div');
+      el.className = 'sb-item' + (currentView === t.id ? ' active' : '');
+      const badge = t.type === 'pdf' ? '<span class="sb-badge pdf">PDF</span>' : '';
+      el.innerHTML = t.label + badge;
+      el.onclick = () => { currentView = t.id; fieldVals = {}; buildSidebar(); renderContent(); };
+      nav.appendChild(el);
+    });
+  });
+
+  // HBU Tool
+  const hbuCat = document.createElement('div');
+  hbuCat.className = 'sb-cat'; hbuCat.textContent = 'HBU Tool';
+  nav.appendChild(hbuCat);
+  const hbuItem = document.createElement('div');
+  hbuItem.className = 'sb-item' + (currentView === 'hbu' ? ' active' : '');
+  hbuItem.textContent = 'HBU Research & Prompt';
+  hbuItem.onclick = () => { currentView = 'hbu'; buildSidebar(); renderContent(); };
+  nav.appendChild(hbuItem);
+}
+
+// ─── CONTENT RENDERER ────────────────────────────────────────────────────────
+
+function renderContent() {
+  const el = document.getElementById('content');
+  if (currentView === 'welcome') { renderWelcome(el); return; }
+  if (currentView === 'hbu')     { renderHBU(el);     return; }
+  const tmpl = TEMPLATES.find(t => t.id === currentView);
+  if (tmpl) renderTemplate(el, tmpl);
+}
+
+function renderWelcome(el) {
+  el.innerHTML = `
+  <div class="welcome">
+    <h2>GA Appraisals — Appraiser Tools</h2>
+    <p>Select a tool from the sidebar. Each tool generates a ready-to-paste Claude prompt based on your assignment data. No data is saved — fields reset each session.</p>
+    <p><strong>Workflow:</strong></p>
+    <ul>
+      <li>Fill in the assignment fields</li>
+      <li>Click <strong>Copy prompt</strong></li>
+      <li>Open <a href="https://claude.ai" target="_blank">claude.ai</a> in a new tab</li>
+      <li>Paste the prompt and hit enter</li>
+      <li>Copy the output into Total</li>
+    </ul>
+    <p style="margin-top:1rem; font-size:12.5px; color:var(--text3)">PDF tools: export the relevant pages from Total as a PDF, attach to a new Claude chat, then paste the generated prompt.</p>
+  </div>`;
+}
+
+function renderTemplate(el, t) {
+  let html = `
+  <div class="page-title">${t.label}</div>
+  <div class="page-desc">${t.desc}</div>`;
+
+  if (t.type === 'pdf') {
+    html += `<div class="how-box"><strong>How to use:</strong> ${t.how}</div>`;
+  } else {
+    html += `<div class="how-box"><strong>How to use:</strong> Fill in the fields below, then copy the generated prompt into a new Claude chat.</div>`;
+    html += `<div class="section-label">Assignment data</div><div class="fgrid" id="fgrid">`;
+    t.fields.forEach(f => {
+      html += `<div class="fg${f.full?' full':''}"><label>${f.label}</label><input type="text" id="fi_${f.id}" placeholder="${f.ph||''}" value="${fieldVals[f.id]||''}"></div>`;
+    });
+    html += `</div>`;
+  }
+
+  html += `<hr>
+  <div class="prompt-header">
+    <span class="prompt-label">Generated prompt</span>
+    <button class="copy-btn" id="cpybtn">Copy prompt</button>
+  </div>
+  <div class="pbox" id="pbox"></div>`;
+  el.innerHTML = html;
+
+  function update() {
+    if (t.fields) t.fields.forEach(f => { const i = document.getElementById('fi_'+f.id); if(i) fieldVals[f.id] = i.value; });
+    document.getElementById('pbox').textContent = t.prompt(fieldVals);
+  }
+  if (t.fields) t.fields.forEach(f => { const i = document.getElementById('fi_'+f.id); if(i) i.addEventListener('input', update); });
+  update();
+
+  document.getElementById('cpybtn').onclick = function() {
+    navigator.clipboard.writeText(document.getElementById('pbox').textContent).then(() => {
+      this.textContent = 'Copied!'; this.classList.add('ok');
+      setTimeout(() => { this.textContent = 'Copy prompt'; this.classList.remove('ok'); }, 2200);
+    });
+  };
+}
+
+// ─── HBU TOOL ────────────────────────────────────────────────────────────────
+
+let hbuFields = {};
+
+function renderHBU(el) {
+  el.innerHTML = `
+  <div class="page-title">HBU Research &amp; Prompt</div>
+  <div class="page-desc">Select a jurisdiction to get direct research links, fill in the four tests, and generate your HBU prompt.</div>
+
+  <div class="section-label">Subject property</div>
+  <div class="fgrid" style="margin-bottom:10px">
+    <div class="fg full"><label>Property address</label><input type="text" id="h_address" placeholder="789 Hillside Ave, Altadena, CA" value="${hbuFields.address||''}"></div>
+    <div class="fg"><label>APN</label><input type="text" id="h_apn" placeholder="5841-002-013" value="${hbuFields.apn||''}"></div>
+    <div class="fg"><label>Current use</label><input type="text" id="h_currentuse" placeholder="single-family residence" value="${hbuFields.currentuse||''}"></div>
+  </div>
+
+  <div class="section-label">Jurisdiction</div>
+  <div class="city-row">
+    <div class="fg"><label>Search cities</label><input type="text" id="city-search" placeholder="Type city name..." oninput="filterCities()"></div>
+    <div class="fg"><label>County</label>
+      <select id="county-sel" disabled>
+        <option>Los Angeles County</option>
+        <option disabled>Orange County (coming soon)</option>
+        <option disabled>San Bernardino County (coming soon)</option>
+        <option disabled>Riverside County (coming soon)</option>
+        <option disabled>Ventura County (coming soon)</option>
+      </select>
+    </div>
+  </div>
+  <div class="city-list" id="city-list"></div>
+
+  <div class="links-box" style="margin-top:10px">
+    <div class="links-title" id="links-title">Research links — select a jurisdiction above</div>
+    <div id="link-grid" class="link-grid"><span class="no-city">No jurisdiction selected.</span></div>
+  </div>
+
+  <div class="section-label">Four tests</div>
+  <div class="test-grid">
+    <div class="test-card">
+      <div><div class="test-num">Test 1</div><div class="test-name">Legally permissible</div></div>
+      <div class="fg"><label>Zoning designation</label><input type="text" id="h_zoning" placeholder="R-1 — single-family residential" value="${hbuFields.zoning||''}"></div>
+      <div class="fg"><label>Permitted uses (ADU, overlays, variances)</label><textarea id="h_permitted" placeholder="SFR; ADU permitted by right under AB 68/AB 2221">${hbuFields.permitted||''}</textarea></div>
+    </div>
+    <div class="test-card">
+      <div><div class="test-num">Test 2</div><div class="test-name">Physically possible</div></div>
+      <div class="fg"><label>Lot size / dimensions</label><input type="text" id="h_lot" placeholder="7,500 sf — 50 × 150 ft" value="${hbuFields.lot||''}"></div>
+      <div class="fg"><label>Constraints, utilities, topography</label><textarea id="h_physical" placeholder="Flat; all utilities available; no adverse constraints">${hbuFields.physical||''}</textarea></div>
+    </div>
+    <div class="test-card">
+      <div><div class="test-num">Test 3</div><div class="test-name">Financially feasible</div></div>
+      <div class="fg"><label>Feasible uses given market demand</label><textarea id="h_feasible" placeholder="SFR with optional ADU; market supports this use at current value levels">${hbuFields.feasible||''}</textarea></div>
+    </div>
+    <div class="test-card">
+      <div><div class="test-num">Test 4</div><div class="test-name">Maximally productive</div></div>
+      <div class="fg"><label>Use generating highest value</label><textarea id="h_maxprod" placeholder="Single-family residence as currently improved">${hbuFields.maxprod||''}</textarea></div>
+    </div>
+  </div>
+
+  <div class="section-label" style="margin-top:12px">Conclusions</div>
+  <div class="conc-row">
+    <div class="conc-card"><div class="conc-title">HBU as if vacant</div><textarea id="h_vacant" placeholder="Develop a single-family residence; ADU as secondary improvement">${hbuFields.vacant||''}</textarea></div>
+    <div class="conc-card"><div class="conc-title">HBU as improved</div><textarea id="h_improved" placeholder="Continued use as a single-family residence">${hbuFields.improved||''}</textarea></div>
+  </div>
+
+  <hr>
+  <div class="prompt-header">
+    <span class="prompt-label">Generated HBU prompt</span>
+    <button class="copy-btn" id="hbu-cpybtn">Copy prompt</button>
+  </div>
+  <div class="pbox" id="hbu-pbox"></div>`;
+
+  filterCities();
+  if (selectedCity) renderLinks();
+  updateHBUPrompt();
+
+  ['h_address','h_apn','h_currentuse','h_zoning','h_permitted','h_lot','h_physical','h_feasible','h_maxprod','h_vacant','h_improved'].forEach(id => {
+    const el2 = document.getElementById(id);
+    if (el2) el2.addEventListener('input', () => { hbuFields[id.replace('h_','')] = el2.value; updateHBUPrompt(); });
+  });
+
+  document.getElementById('hbu-cpybtn').onclick = function() {
+    navigator.clipboard.writeText(document.getElementById('hbu-pbox').textContent).then(() => {
+      this.textContent = 'Copied!'; this.classList.add('ok');
+      setTimeout(() => { this.textContent = 'Copy prompt'; this.classList.remove('ok'); }, 2200);
+    });
+  };
+}
+
+function filterCities() {
+  const list = document.getElementById('city-list');
+  if (!list) return;
+  const q = ((document.getElementById('city-search')||{}).value||'').toLowerCase().trim();
+  list.innerHTML = '';
+  REGIONS.forEach(r => {
+    const matches = r.cities.filter(c => !q || c.name.toLowerCase().includes(q));
+    if (!matches.length) return;
+    const hdr = document.createElement('div'); hdr.className = 'region-hdr'; hdr.textContent = r.label;
+    list.appendChild(hdr);
+    matches.forEach(c => {
+      const item = document.createElement('div');
+      item.className = 'city-item' + (selectedCity && selectedCity.id === c.id ? ' active' : '');
+      item.innerHTML = c.name + (c.uninc ? ' <span class="uninc-badge">Unincorp.</span>' : '');
+      item.onclick = () => { selectedCity = c; filterCities(); renderLinks(); updateHBUPrompt(); };
+      list.appendChild(item);
+    });
+  });
+}
+
+function renderLinks() {
+  const grid = document.getElementById('link-grid');
+  const title = document.getElementById('links-title');
+  if (!grid) return;
+  if (!selectedCity) { title.textContent = 'Research links — select a jurisdiction above'; grid.innerHTML = '<span class="no-city">No jurisdiction selected.</span>'; return; }
+  title.textContent = 'Research links — ' + selectedCity.name;
+  grid.innerHTML = selectedCity.links.map(l =>
+    `<a class="lnk" href="${l.url}" target="_blank"><span class="lnk-label">${l.label}</span><span class="lnk-sub">${l.sub}</span></a>`
+  ).join('');
+}
+
+function g(id) { return (document.getElementById(id)||{}).value||''; }
+
+function updateHBUPrompt() {
+  const pb = document.getElementById('hbu-pbox'); if (!pb) return;
+  const cityName = selectedCity ? selectedCity.name : '[jurisdiction]';
+  pb.textContent = `You are a licensed real estate appraiser writing narrative for a non-lender appraisal report.
+
+Task: Write a highest and best use analysis.
+
+Data:
+- Property: ${g('h_address')||'[address]'}${g('h_apn') ? ' (APN: '+g('h_apn')+')' : ''}
+- Jurisdiction: ${cityName}
+- Current use: ${g('h_currentuse')||'[current use]'}
+
+Test 1 — Legally permissible:
+  Zoning: ${g('h_zoning')||'[zoning]'}
+  Permitted uses: ${g('h_permitted')||'[permitted uses]'}
+
+Test 2 — Physically possible:
+  Lot: ${g('h_lot')||'[lot size/dimensions]'}
+  Conditions: ${g('h_physical')||'[physical conditions]'}
+
+Test 3 — Financially feasible:
+  ${g('h_feasible')||'[financially feasible uses]'}
+
+Test 4 — Maximally productive:
+  ${g('h_maxprod')||'[maximally productive use]'}
+
+HBU as if vacant: ${g('h_vacant')||'[vacant conclusion]'}
+HBU as improved: ${g('h_improved')||'[improved conclusion]'}
+
+Requirements:
+- Length: 200–250 words
+- Continuous paragraph prose only — no headers, bullets, or markdown
+- Address all four HBU tests for both as if vacant and as improved
+- Formal appraisal language; use "highest and best use" correctly
+- Do not use first person
+- Output the paragraph only`;
+}
+
+// ─── INIT ────────────────────────────────────────────────────────────────────
+
+buildSidebar();
+renderContent();
+</script>
+</body>
+</html>
