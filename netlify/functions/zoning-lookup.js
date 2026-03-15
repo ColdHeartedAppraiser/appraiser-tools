@@ -49,21 +49,21 @@ async function queryLayer(url, lat, lng, outFields = '*') {
 
 // Determine if point is within City of LA boundary
 async function detectJurisdiction(lat, lng) {
+  // Layer 15 = County Boundary — has CITY_NAME and CITY_TYPE ("City" or "Unincorporated")
   try {
-    const cityBoundaryUrl = 'https://maps.lacity.org/lahub/rest/services/Boundaries/MapServer/12/query';
-    const result = await queryLayer(cityBoundaryUrl, lat, lng, 'CITY_NAME');
-    if (result && result.CITY_NAME && result.CITY_NAME.toLowerCase().includes('los angeles')) {
-      return 'city_la';
+    const result = await queryLayer(
+      'https://maps.lacity.org/lahub/rest/services/Boundaries/MapServer/15/query',
+      lat, lng, 'CITY_NAME,CITY_TYPE,FEAT_TYPE'
+    );
+    if (result) {
+      const cityType = (result.CITY_TYPE || '').trim().toUpperCase();
+      const cityName = (result.CITY_NAME || '').trim().toUpperCase();
+      const featType = (result.FEAT_TYPE || '').trim().toUpperCase();
+      if (featType !== 'LAND') return 'other'; // skip water/pier polygons
+      if (cityType === 'UNINCORPORATED') return 'uninc_la';
+      if (cityName === 'LOS ANGELES') return 'city_la';
     }
   } catch (e) { /* fall through */ }
-  
-  // Check if in any incorporated city vs unincorporated county
-  try {
-    const countyUrl = 'https://arcgis.gis.lacounty.gov/arcgis/rest/services/DRP/LUIMS/MapServer/0/query';
-    const result = await queryLayer(countyUrl, lat, lng, 'CITY_TYPE');
-    if (result && result.CITY_TYPE === 'UNINCORPORATED') return 'uninc_la';
-  } catch (e) { /* fall through */ }
-
   return 'other';
 }
 
