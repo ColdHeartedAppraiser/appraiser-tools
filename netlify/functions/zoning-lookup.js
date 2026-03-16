@@ -1,73 +1,73 @@
-// GA Appraisals — Zoning Lookup Function
-// Jurisdiction: Layer 7 (City Boundary) = City of LA. No result = outside city.
-// Zoning data: NavigateLA MapServer for LA City, eGIS for LA County.
+// GA Appraisals — Zoning Lookup
+// Uses confirmed ZIMAS ArcGIS REST services with correct coordinate system (WKID 2229)
+// Jurisdiction: Layer 7 (Boundaries MapServer, WGS84) = City of LA
+// Zone data: ZIMAS zoning/MapServer/1102 (State Plane 2229)
 
 const GOOGLE_GEOCODE = 'https://maps.googleapis.com/maps/api/geocode/json';
 
-// LA City — Boundaries MapServer (confirmed public)
+// City boundary — uses WGS84, confirmed working
 const LA_CITY_BOUNDARY = 'https://maps.lacity.org/lahub/rest/services/Boundaries/MapServer/7/query';
 
-// LA City — NavigateLA MapServer overlay layers
-// Layer IDs verified from service directory at maps.lacity.org/lahub/rest/services
-const LA_CITY = {
-  // Generalized Zoning (layer 109 in NavigateLA full service)
-  zoning:       'https://maps.lacity.org/arcgis/rest/services/Mapping/NavigateLA/MapServer/109/query',
-  generalPlan:  'https://maps.lacity.org/arcgis/rest/services/Mapping/NavigateLA/MapServer/110/query',
-  toc:          'https://maps.lacity.org/arcgis/rest/services/Mapping/NavigateLA/MapServer/162/query',
-  hpoz:         'https://maps.lacity.org/arcgis/rest/services/Mapping/NavigateLA/MapServer/54/query',
-  specificPlan: 'https://maps.lacity.org/arcgis/rest/services/Mapping/NavigateLA/MapServer/53/query',
-  fireHazard:   'https://maps.lacity.org/arcgis/rest/services/Mapping/NavigateLA/MapServer/85/query',
-  hillside:     'https://maps.lacity.org/arcgis/rest/services/Mapping/NavigateLA/MapServer/34/query',
+// ZIMAS services — use State Plane 2229, need inSR=4326 + outSR conversion
+// Confirmed from zimas.lacity.org/arcgis/rest/services/zma/
+const ZIMAS = {
+  zoning:     'https://zimas.lacity.org/arcgis/rest/services/zma/zoning/MapServer/1102/query',
+  zoningNew:  'https://zimas.lacity.org/arcgis/rest/services/zma/zoning/MapServer/1101/query',
 };
 
-// LA County eGIS (unincorporated)
+// LA County eGIS (unincorporated) — uses WGS84
 const LA_COUNTY = {
   zoning:      'https://arcgis.gis.lacounty.gov/arcgis/rest/services/DRP/LUIMS/MapServer/4/query',
   generalPlan: 'https://arcgis.gis.lacounty.gov/arcgis/rest/services/DRP/LUIMS/MapServer/2/query',
   fireHazard:  'https://arcgis.gis.lacounty.gov/arcgis/rest/services/DRP/LUIMS/MapServer/13/query',
 };
 
-async function queryLayer(url, lat, lng, outFields) {
+// Query ArcGIS layer — inSR=4326 works for most LA City/County layers
+async function queryLayer(url, lat, lng, outFields, inSR) {
+  const sr = inSR || '4326';
   const params = new URLSearchParams({
     f: 'json',
-    geometry: JSON.stringify({ x: lng, y: lat, spatialReference: { wkid: 4326 } }),
+    geometry: JSON.stringify({ x: lng, y: lat, spatialReference: { wkid: parseInt(sr) } }),
     geometryType: 'esriGeometryPoint',
-    inSR: '4326',
+    inSR: sr,
     spatialRel: 'esriSpatialRelIntersects',
     outFields: outFields || '*',
     returnGeometry: 'false',
     resultRecordCount: '1',
   });
-  const resp = await fetch(url + '?' + params.toString(), { signal: AbortSignal.timeout(8000) });
-  if (!resp.ok) return null;
-  const data = await resp.json();
-  if (data.error) return null;
-  return data.features && data.features.length > 0 ? data.features[0].attributes : null;
+  try {
+    const resp = await fetch(url + '?' + params.toString(), { signal: AbortSignal.timeout(8000) });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (data.error) return null;
+    return data.features && data.features.length > 0 ? data.features[0].attributes : null;
+  } catch(e) {
+    return null;
+  }
 }
 
 async function detectJurisdiction(lat, lng) {
-  // Layer 7 = single City of LA boundary polygon. If point intersects = City of LA.
-  try {
-    const result = await queryLayer(LA_CITY_BOUNDARY, lat, lng, 'OBJECTID');
-    if (result) return 'city_la';
-  } catch (e) {}
+  // Layer 7 = confirmed City of LA boundary polygon, WGS84
+  const result = await queryLayer(LA_CITY_BOUNDARY, lat, lng, 'OBJECTID');
+  if (result) return 'city_la';
 
-  // Not in city — check if unincorporated LA County via eGIS zoning layer
-  try {
-    const r = await queryLayer(LA_COUNTY.zoning, lat, lng, 'ZONE_CODE,ZONE_CLASS,ZONE');
-    if (r && (r.ZONE_CODE || r.ZONE_CLASS || r.ZONE)) return 'uninc_la';
-  } catch (e) {}
-
-  // Final fallback: county boundary layer 15
-  try {
-    const r = await queryLayer(
-      'https://maps.lacity.org/lahub/rest/services/Boundaries/MapServer/15/query',
-      lat, lng, 'CITY_TYPE'
-    );
-    if (r && (r.CITY_TYPE || '').toUpperCase() === 'UNINCORPORATED') return 'uninc_la';
-  } catch (e) {}
+  // Check LA County eGIS for unincorporated
+  const county = await queryLayer(LA_COUNTY.zoning, lat, lng, 'ZONE_CODE,ZONE_CLASS,ZONE');
+  if (county && (county.ZONE_CODE || county.ZONE_CLASS || county.ZONE)) return 'uninc_la';
 
   return 'other';
+}
+
+async function queryZIMASZoning(lat, lng) {
+  // ZIMAS uses State Plane 2229 but accepts inSR=4326 for input geometry
+  const result = await queryLayer(ZIMAS.zoning, lat, lng, 'ZONE_CMPLT,ZONE_CLASS,HEIGHT_DIS,ZONE_SMRY', '4326');
+  if (result && (result.ZONE_CMPLT || result.ZONE_CLASS)) return result;
+
+  // Try Chapter 1A (newer Downtown zones)
+  const result2 = await queryLayer(ZIMAS.zoningNew, lat, lng, 'ZONE_CMPLT,ZONE_CLASS,HEIGHT_DIS', '4326');
+  if (result2 && (result2.ZONE_CMPLT || result2.ZONE_CLASS)) return result2;
+
+  return null;
 }
 
 function parseZoning(zone) {
@@ -138,21 +138,27 @@ function buildVacant(zoneBase, isTOC, isHillside) {
   return 'Development of the highest and best use consistent with zoning, physical characteristics, and market demand.';
 }
 
-function buildHBUData(jurisdiction, zoningCode, generalPlan, toc, hpoz, specificPlan, fireHazard, hillside, address) {
-  const z = parseZoning(zoningCode);
+function buildHBUData(jurisdiction, zoningAttrs, generalPlan, toc, hpoz, specificPlan, fireHazard, hillside, address) {
+  const rawZone = zoningAttrs
+    ? (zoningAttrs.ZONE_CMPLT || zoningAttrs.ZONE_CLASS || zoningAttrs.ZONE_CODE || zoningAttrs.ZONE || null)
+    : null;
+  const heightDistrict = zoningAttrs ? (zoningAttrs.HEIGHT_DIS || null) : null;
+
+  const z = parseZoning(rawZone);
   const isHPOZ = !!(hpoz);
   const isTOC = !!(toc);
   const tocTier = toc ? (toc.TIER || toc.TOC_TIER || toc.Tier || '—') : null;
-  const fireZone = fireHazard ? (fireHazard.HAZ_CLASS || fireHazard.ZONE || fireHazard.FireHazardSeverityZone || '') : null;
+  const fireZone = fireHazard ? (fireHazard.HAZ_CLASS || fireHazard.ZONE || '') : null;
   const isHillside = !!(hillside);
-  const gpLandUse = generalPlan ? (generalPlan.GPLU || generalPlan.LU || generalPlan.GP_LAND_USE || generalPlan.LAND_USE || '—') : '—';
+  const gpLandUse = generalPlan ? (generalPlan.GPLU || generalPlan.LU || generalPlan.LAND_USE || '—') : '—';
   const spName = specificPlan ? (specificPlan.SP_NAME || specificPlan.NAME || null) : null;
   const zoneBase = z.base || '—';
-  const rawZone = z.raw || '—';
+  const displayZone = rawZone || '—';
+  const hd = heightDistrict || z.heightDistrict;
 
-  let permitted = 'Base zone: ' + rawZone;
+  let permitted = 'Base zone: ' + displayZone;
   if (z.conditional) permitted += ' (' + (z.conditional === 'Q' ? 'Q-condition applies' : 'T-condition applies') + ')';
-  if (z.heightDistrict) permitted += '; Height District ' + z.heightDistrict;
+  if (hd) permitted += '; Height District ' + hd;
   if (gpLandUse && gpLandUse !== '—') permitted += '; General Plan: ' + gpLandUse;
   if (spName) permitted += '; within ' + spName + ' Specific Plan';
   if (isHPOZ) permitted += '; HPOZ — historic preservation overlay applies';
@@ -175,9 +181,9 @@ function buildHBUData(jurisdiction, zoningCode, generalPlan, toc, hpoz, specific
   return {
     jurisdiction: jurisdiction,
     address: address,
-    rawZone: rawZone,
+    rawZone: displayZone,
     zoneBase: zoneBase,
-    heightDistrict: z.heightDistrict,
+    heightDistrict: hd,
     generalPlan: gpLandUse,
     specificPlan: spName,
     isHPOZ: isHPOZ,
@@ -185,13 +191,13 @@ function buildHBUData(jurisdiction, zoningCode, generalPlan, toc, hpoz, specific
     tocTier: tocTier,
     fireZone: fireZone,
     isHillside: isHillside,
-    sb9: determineSB9(rawZone, isHPOZ, fireZone),
+    sb9: determineSB9(displayZone, isHPOZ, fireZone),
     permitted: permitted,
     physical: physical,
     feasible: feasible,
     flags: flags,
     hbu: {
-      zoning: rawZone + (z.heightDistrict ? '-' + z.heightDistrict : '') + (gpLandUse !== '—' ? ' — General Plan: ' + gpLandUse : ''),
+      zoning: displayZone + (hd ? '-' + hd : '') + (gpLandUse !== '—' ? ' — General Plan: ' + gpLandUse : ''),
       permitted: permitted,
       physical: physical + ' Confirm lot dimensions, utilities, topography.',
       feasible: feasible,
@@ -232,36 +238,33 @@ exports.handler = async function(event) {
   // Detect jurisdiction
   const jurisdiction = await detectJurisdiction(lat, lng);
 
-  // Query overlays
-  let zoning = null, generalPlan = null, toc = null, hpoz = null,
+  // Query data based on jurisdiction
+  let zoningAttrs = null, generalPlan = null, toc = null, hpoz = null,
       specificPlan = null, fireHazard = null, hillside = null;
-  const queries = [];
 
   if (jurisdiction === 'city_la') {
-    queries.push(
-      queryLayer(LA_CITY.zoning,       lat, lng, 'ZONE_CLASS,ZONE_CMPLT,ZONE_SMRY,HEIGHT_DIS').then(function(r) { zoning = r; }),
-      queryLayer(LA_CITY.generalPlan,  lat, lng, 'GPLU,LU,GP_LAND_USE').then(function(r) { generalPlan = r; }),
-      queryLayer(LA_CITY.toc,          lat, lng, 'TIER,TOC_TIER,Tier').then(function(r) { toc = r; }),
-      queryLayer(LA_CITY.hpoz,         lat, lng, 'HPOZ_NAME,NAME').then(function(r) { hpoz = r; }),
-      queryLayer(LA_CITY.specificPlan, lat, lng, 'SP_NAME,NAME,SPECIFIC_PLAN').then(function(r) { specificPlan = r; }),
-      queryLayer(LA_CITY.fireHazard,   lat, lng, 'HAZ_CLASS,ZONE,FireHazardSeverityZone').then(function(r) { fireHazard = r; }),
-      queryLayer(LA_CITY.hillside,     lat, lng, 'HILLSIDE,TYPE').then(function(r) { hillside = r; })
-    );
+    // Run ZIMAS zoning query + overlay queries in parallel
+    const [zResult] = await Promise.allSettled([queryZIMASZoning(lat, lng)]);
+    if (zResult.status === 'fulfilled') zoningAttrs = zResult.value;
+
+    // Overlay layers — NavigateLA MapServer (best effort, layer IDs may need calibration)
+    await Promise.allSettled([
+      queryLayer('https://maps.lacity.org/arcgis/rest/services/Mapping/NavigateLA/MapServer/110/query', lat, lng, 'GPLU,LU,GP_LAND_USE').then(function(r) { generalPlan = r; }),
+      queryLayer('https://maps.lacity.org/arcgis/rest/services/Mapping/NavigateLA/MapServer/162/query', lat, lng, 'TIER,TOC_TIER,Tier').then(function(r) { toc = r; }),
+      queryLayer('https://maps.lacity.org/arcgis/rest/services/Mapping/NavigateLA/MapServer/54/query',  lat, lng, 'HPOZ_NAME,NAME').then(function(r) { hpoz = r; }),
+      queryLayer('https://maps.lacity.org/arcgis/rest/services/Mapping/NavigateLA/MapServer/53/query',  lat, lng, 'SP_NAME,NAME').then(function(r) { specificPlan = r; }),
+      queryLayer('https://maps.lacity.org/arcgis/rest/services/Mapping/NavigateLA/MapServer/85/query',  lat, lng, 'HAZ_CLASS,ZONE').then(function(r) { fireHazard = r; }),
+      queryLayer('https://maps.lacity.org/arcgis/rest/services/Mapping/NavigateLA/MapServer/34/query',  lat, lng, 'HILLSIDE,TYPE').then(function(r) { hillside = r; }),
+    ]);
   } else if (jurisdiction === 'uninc_la') {
-    queries.push(
-      queryLayer(LA_COUNTY.zoning,      lat, lng, 'ZONE_CODE,ZONE_CLASS,ZONE').then(function(r) { zoning = r; }),
+    await Promise.allSettled([
+      queryLayer(LA_COUNTY.zoning,      lat, lng, 'ZONE_CODE,ZONE_CLASS,ZONE').then(function(r) { zoningAttrs = r; }),
       queryLayer(LA_COUNTY.generalPlan, lat, lng, 'GPLU,LU,LAND_USE').then(function(r) { generalPlan = r; }),
-      queryLayer(LA_COUNTY.fireHazard,  lat, lng, 'HAZ_CLASS,ZONE').then(function(r) { fireHazard = r; })
-    );
+      queryLayer(LA_COUNTY.fireHazard,  lat, lng, 'HAZ_CLASS,ZONE').then(function(r) { fireHazard = r; }),
+    ]);
   }
 
-  await Promise.allSettled(queries);
-
-  const zoningCode = zoning
-    ? (zoning.ZONE_CLASS || zoning.ZONE_CMPLT || zoning.ZONE_SMRY || zoning.ZONE_CODE || zoning.ZONE || null)
-    : null;
-
-  const hbuData = buildHBUData(jurisdiction, zoningCode, generalPlan, toc, hpoz, specificPlan, fireHazard, hillside, formattedAddress);
+  const hbuData = buildHBUData(jurisdiction, zoningAttrs, generalPlan, toc, hpoz, specificPlan, fireHazard, hillside, formattedAddress);
 
   return {
     statusCode: 200,
