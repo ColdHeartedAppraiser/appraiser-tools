@@ -166,6 +166,12 @@ input[type=file] { display: none; }
 .step-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
 .step-desc { font-size: 12px; color: var(--text2); line-height: 1.5; }
 </style>
+<script>
+  // Replace with your Google Maps API key
+  // Restrict this key to HTTP referrers: https://ga-appraisal-tools.netlify.app/*
+  // in Google Cloud Console → APIs & Services → Keys & Credentials
+  window.GOOGLE_MAPS_KEY = 'AIzaSyDNV4mq_19HqfqQznedwil-1hXSqoYwKHE';
+</script>
 </head>
 <body>
 
@@ -753,73 +759,233 @@ function renderHBU(el) {
 async function runZoningLookup() {
   const address = g('h_address');
   if (!address.trim()) { alert('Please enter a property address first.'); return; }
-  
+
   const btn = document.getElementById('lookup-btn');
+  const resultBox = document.getElementById('lookup-result-box');
   btn.disabled = true; btn.classList.add('loading');
   btn.querySelector('.btn-text').textContent = 'Looking up…';
-
-  const resultBox = document.getElementById('lookup-result-box');
-  resultBox.style.display = 'none';
+  if (resultBox) resultBox.style.display = 'none';
 
   try {
-    const resp = await fetch('/.netlify/functions/zoning-lookup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ address })
-    });
-    const data = await resp.json();
+    // Step 1: Geocode with Google (browser-side, key referrer-restricted)
+    const GOOGLE_KEY = window.GOOGLE_MAPS_KEY || '';
+    if (!GOOGLE_KEY) { showLookupResult('error', 'Google Maps API key not configured. Add window.GOOGLE_MAPS_KEY to the HTML.'); return; }
+    const geoResp = await fetch('https://maps.googleapis.com/maps/api/geocode/json?address=' + encodeURIComponent(address) + '&key=' + GOOGLE_KEY);
+    const geoData = await geoResp.json();
+    if (!geoData.results || !geoData.results.length) { showLookupResult('error', 'Address not found. Please verify and try again.'); return; }
+    const loc = geoData.results[0].geometry.location;
+    const lat = loc.lat, lng = loc.lng;
+    const formattedAddress = geoData.results[0].formatted_address;
 
-    if (!resp.ok || !data.success) {
-      showLookupResult('error', data.error || 'Lookup failed. Please check the address and try again.');
-      return;
+    // Step 2: Detect jurisdiction — Layer 7 = City of LA boundary (confirmed working)
+    const boundaryResult = await browserQueryLayer(
+      'https://maps.lacity.org/lahub/rest/services/Boundaries/MapServer/7/query',
+      lat, lng, 'OBJECTID'
+    );
+    let jurisdiction = boundaryResult ? 'city_la' : 'other';
+
+    // If not City of LA, check LA County unincorporated via eGIS
+    if (jurisdiction === 'other') {
+      const countyResult = await browserQueryLayer(
+        'https://arcgis.gis.lacounty.gov/arcgis/rest/services/DRP/LUIMS/MapServer/4/query',
+        lat, lng, 'ZONE_CODE,ZONE_CLASS,ZONE'
+      );
+      if (countyResult && (countyResult.ZONE_CODE || countyResult.ZONE_CLASS || countyResult.ZONE)) {
+        jurisdiction = 'uninc_la';
+      }
     }
 
-    // Populate fields
-    const h = data.hbu;
-    if (h.zoning)    { const el=document.getElementById('h_zoning');    if(el){el.value=h.zoning;    hbuFieldVals.zoning=h.zoning;} }
-    if (h.permitted) { const el=document.getElementById('h_permitted'); if(el){el.value=h.permitted; hbuFieldVals.permitted=h.permitted;} }
-    if (h.physical)  { const el=document.getElementById('h_physical');  if(el){el.value=h.physical;  hbuFieldVals.physical=h.physical;} }
-    if (h.feasible)  { const el=document.getElementById('h_feasible');  if(el){el.value=h.feasible;  hbuFieldVals.feasible=h.feasible;} }
-    if (h.maxprod)   { const el=document.getElementById('h_maxprod');   if(el){el.value=h.maxprod;   hbuFieldVals.maxprod=h.maxprod;} }
-    if (h.vacant)    { const el=document.getElementById('h_vacant');    if(el){el.value=h.vacant;    hbuFieldVals.vacant=h.vacant;} }
-    if (h.improved)  { const el=document.getElementById('h_improved');  if(el){el.value=h.improved;  hbuFieldVals.improved=h.improved;} }
+    // Step 3: Query zoning data based on jurisdiction
+    let zoningAttrs = null, generalPlan = null, toc = null, hpoz = null,
+        specificPlan = null, fireHazard = null, hillside = null;
 
-    // Show summary card
-    const jLabel = data.jurisdiction === 'city_la' ? 'City of Los Angeles' : data.jurisdiction === 'uninc_la' ? 'Unincorporated LA County' : 'Other jurisdiction';
-    const flags = data.flags && data.flags.length ? data.flags.map(f=>`<li>${f}</li>`).join('') : '<li>No special overlays detected</li>';
-    const sb9text = data.sb9 || '—';
-    
+    if (jurisdiction === 'city_la') {
+      // ZIMAS zoning layer — confirmed endpoint, browser can access it
+      const [z, gp, t, h, sp, fh, hs] = await Promise.allSettled([
+        browserQueryLayer('https://zimas.lacity.org/arcgis/rest/services/zma/zoning/MapServer/1102/query', lat, lng, 'ZONE_CMPLT,ZONE_CLASS,HEIGHT_DIS'),
+        browserQueryLayer('https://maps.lacity.org/lahub/rest/services/City_Planning_Department/MapServer/1/query', lat, lng, 'GPLU,LU,GP_LAND_USE'),
+        browserQueryLayer('https://maps.lacity.org/lahub/rest/services/City_Planning_Department/MapServer/23/query', lat, lng, 'TIER,TOC_TIER'),
+        browserQueryLayer('https://maps.lacity.org/lahub/rest/services/City_Planning_Department/MapServer/6/query', lat, lng, 'HPOZ_NAME,NAME'),
+        browserQueryLayer('https://maps.lacity.org/lahub/rest/services/City_Planning_Department/MapServer/7/query', lat, lng, 'SP_NAME,NAME'),
+        browserQueryLayer('https://maps.lacity.org/lahub/rest/services/City_Planning_Department/MapServer/21/query', lat, lng, 'HAZ_CLASS,ZONE'),
+        browserQueryLayer('https://maps.lacity.org/lahub/rest/services/City_Planning_Department/MapServer/10/query', lat, lng, 'HILLSIDE,TYPE'),
+      ]);
+      if (z.status === 'fulfilled') zoningAttrs = z.value;
+      if (gp.status === 'fulfilled') generalPlan = gp.value;
+      if (t.status === 'fulfilled') toc = t.value;
+      if (h.status === 'fulfilled') hpoz = h.value;
+      if (sp.status === 'fulfilled') specificPlan = sp.value;
+      if (fh.status === 'fulfilled') fireHazard = fh.value;
+      if (hs.status === 'fulfilled') hillside = hs.value;
+
+    } else if (jurisdiction === 'uninc_la') {
+      const [z, gp, fh] = await Promise.allSettled([
+        browserQueryLayer('https://arcgis.gis.lacounty.gov/arcgis/rest/services/DRP/LUIMS/MapServer/4/query', lat, lng, 'ZONE_CODE,ZONE_CLASS,ZONE'),
+        browserQueryLayer('https://arcgis.gis.lacounty.gov/arcgis/rest/services/DRP/LUIMS/MapServer/2/query', lat, lng, 'GPLU,LU,LAND_USE'),
+        browserQueryLayer('https://arcgis.gis.lacounty.gov/arcgis/rest/services/DRP/LUIMS/MapServer/13/query', lat, lng, 'HAZ_CLASS,ZONE'),
+      ]);
+      if (z.status === 'fulfilled') zoningAttrs = z.value;
+      if (gp.status === 'fulfilled') generalPlan = gp.value;
+      if (fh.status === 'fulfilled') fireHazard = fh.value;
+    }
+
+    // Step 4: Extract values and build display
+    const rawZone = zoningAttrs
+      ? (zoningAttrs.ZONE_CMPLT || zoningAttrs.ZONE_CLASS || zoningAttrs.ZONE_CODE || zoningAttrs.ZONE || null)
+      : null;
+    const heightDistrict = zoningAttrs ? (zoningAttrs.HEIGHT_DIS || null) : null;
+    const gpLandUse = generalPlan ? (generalPlan.GPLU || generalPlan.LU || generalPlan.GP_LAND_USE || generalPlan.LAND_USE || null) : null;
+    const tocTier = toc ? (toc.TIER || toc.TOC_TIER || toc.Tier || null) : null;
+    const hpozName = hpoz ? (hpoz.HPOZ_NAME || hpoz.NAME || null) : null;
+    const spName = specificPlan ? (specificPlan.SP_NAME || specificPlan.NAME || null) : null;
+    const fireZone = fireHazard ? (fireHazard.HAZ_CLASS || fireHazard.ZONE || null) : null;
+    const isHillside = !!(hillside);
+
+    // Step 5: Populate HBU fields
+    const zoneBase = parseZoneBase(rawZone);
+    let permitted = rawZone ? 'Base zone: ' + rawZone : '';
+    if (heightDistrict) permitted += '; Height District ' + heightDistrict;
+    if (gpLandUse) permitted += '; General Plan: ' + gpLandUse;
+    if (spName) permitted += '; within ' + spName + ' Specific Plan';
+    if (hpozName) permitted += '; HPOZ (' + hpozName + ') — historic preservation overlay applies';
+    if (tocTier) permitted += '; TOC Tier ' + tocTier + ' — density bonus eligible';
+    permitted += '; ADU and JADU permitted by right per state law';
+
+    let physical = 'To be confirmed from inspection and physical observation.';
+    if (isHillside) physical = 'Hillside area — grading ordinance applies; slope analysis required.';
+    if (fireZone) physical += ' Fire Hazard Severity Zone: ' + fireZone + ' — fire hardening requirements apply.';
+
+    const feasible = buildFeasibleText(zoneBase, !!tocTier, tocTier);
+    const maxprod = buildMaxProdText(zoneBase, !!hpozName, !!tocTier);
+    const vacant = buildVacantText(zoneBase, !!tocTier, isHillside);
+
+    const fields = {
+      h_zoning: (rawZone || '') + (heightDistrict ? '-' + heightDistrict : '') + (gpLandUse ? ' — General Plan: ' + gpLandUse : ''),
+      h_permitted: permitted,
+      h_physical: physical + ' Confirm lot dimensions, utilities, topography.',
+      h_feasible: feasible,
+      h_maxprod: maxprod,
+      h_vacant: vacant,
+      h_improved: 'Continued use as currently improved, subject to confirmation of condition, functional utility, and market support.',
+    };
+
+    Object.entries(fields).forEach(([id, val]) => {
+      const el = document.getElementById(id);
+      if (el) { el.value = val; hbuFieldVals[id.replace('h_', '')] = val; }
+    });
+
+    // Step 6: Build summary card
+    const jLabel = jurisdiction === 'city_la' ? 'City of Los Angeles' : jurisdiction === 'uninc_la' ? 'Unincorporated LA County' : 'Other jurisdiction';
+    const flags = [];
+    if (hpozName) flags.push('HPOZ (' + hpozName + ') — exterior alterations require HPOZ board approval');
+    if (spName) flags.push('Specific Plan (' + spName + ') — may impose additional standards');
+    if (tocTier) flags.push('TOC Tier ' + tocTier + ' — density bonus available for affordable housing projects');
+    if (isHillside) flags.push('Hillside Grading Ordinance applies');
+    if (fireZone) flags.push('Fire Hazard Zone: ' + fireZone);
+
+    const flagsHtml = flags.length
+      ? flags.map(f => '<li>' + f + '</li>').join('')
+      : '<li>No special overlays detected</li>';
+
+    const sb9 = determineSB9Text(rawZone, !!hpozName, fireZone);
+
     showLookupResult('success', '', `
-      <div style="font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">Zoning lookup result — ${data.address}</div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px;margin-bottom:10px">
+      <div style="font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">Zoning lookup — ${formattedAddress}</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;margin-bottom:10px">
         <div class="z-chip"><span class="z-chip-label">Jurisdiction</span><span class="z-chip-val">${jLabel}</span></div>
-        <div class="z-chip"><span class="z-chip-label">Zone</span><span class="z-chip-val">${data.rawZone||'—'}</span></div>
-        <div class="z-chip"><span class="z-chip-label">General plan</span><span class="z-chip-val">${data.generalPlan||'—'}</span></div>
-        <div class="z-chip"><span class="z-chip-label">TOC tier</span><span class="z-chip-val">${data.tocTier||'None'}</span></div>
-        <div class="z-chip"><span class="z-chip-label">HPOZ</span><span class="z-chip-val">${data.isHPOZ?'Yes — '+((data.hpoz&&(data.hpoz.HPOZ_NAME||data.hpoz.NAME))||'see ZIMAS'):'No'}</span></div>
-        <div class="z-chip"><span class="z-chip-label">Fire zone</span><span class="z-chip-val">${data.fireZone||'Not designated'}</span></div>
-        <div class="z-chip"><span class="z-chip-label">Hillside</span><span class="z-chip-val">${data.isHillside?'Yes':'No'}</span></div>
-        <div class="z-chip"><span class="z-chip-label">SB9</span><span class="z-chip-val" style="font-size:10px">${sb9text}</span></div>
+        <div class="z-chip"><span class="z-chip-label">Zone</span><span class="z-chip-val">${rawZone || '—'}</span></div>
+        <div class="z-chip"><span class="z-chip-label">General plan</span><span class="z-chip-val">${gpLandUse || '—'}</span></div>
+        <div class="z-chip"><span class="z-chip-label">TOC tier</span><span class="z-chip-val">${tocTier || 'None'}</span></div>
+        <div class="z-chip"><span class="z-chip-label">HPOZ</span><span class="z-chip-val">${hpozName || 'No'}</span></div>
+        <div class="z-chip"><span class="z-chip-label">Fire zone</span><span class="z-chip-val">${fireZone || 'Not designated'}</span></div>
+        <div class="z-chip"><span class="z-chip-label">Hillside</span><span class="z-chip-val">${isHillside ? 'Yes' : 'No'}</span></div>
+        <div class="z-chip"><span class="z-chip-label">SB9</span><span class="z-chip-val" style="font-size:10px">${sb9}</span></div>
       </div>
-      <div style="font-size:11.5px;color:var(--text2)"><strong>Flags:</strong><ul style="margin:4px 0 0 1.2rem;line-height:1.9">${flags}</ul></div>
-      <div style="font-size:11px;color:var(--text3);margin-top:8px">Fields pre-populated below. Review and adjust before generating. Always verify against ZIMAS for LA City or ZNet for unincorporated areas.</div>
+      <div style="font-size:11.5px;color:var(--text2)"><strong>Flags:</strong><ul style="margin:4px 0 0 1.2rem;line-height:1.9">${flagsHtml}</ul></div>
+      <div style="font-size:11px;color:var(--text3);margin-top:8px">Fields pre-populated below. Review before generating. Always verify against ZIMAS for LA City or ZNet for unincorporated areas.</div>
     `);
 
-    // Auto-select city in sidebar if LA City
-    if (data.jurisdiction === 'city_la') {
-      selectedCity = REGIONS.flatMap(r=>r.cities).find(c=>c.id==='city_la') || null;
-      filterCities(); renderLinks();
-    } else if (data.jurisdiction === 'uninc_la') {
-      selectedCity = REGIONS.flatMap(r=>r.cities).find(c=>c.id==='u_altadena') || null;
-      filterCities(); renderLinks();
+    // Auto-select city in research links
+    if (jurisdiction === 'city_la') {
+      selectedCity = REGIONS.flatMap(r => r.cities).find(c => c.id === 'city_la') || null;
+    } else if (jurisdiction === 'uninc_la') {
+      selectedCity = REGIONS.flatMap(r => r.cities).find(c => c.id === 'u_altadena') || null;
     }
+    filterCities(); renderLinks();
 
   } catch(e) {
-    showLookupResult('error', 'Network error: ' + e.message + '. Check your connection and try again.');
+    showLookupResult('error', 'Lookup error: ' + e.message);
   } finally {
-    btn.disabled=false; btn.classList.remove('loading');
-    btn.querySelector('.btn-text').textContent='Look up zoning';
+    btn.disabled = false; btn.classList.remove('loading');
+    btn.querySelector('.btn-text').textContent = 'Look up zoning';
   }
+}
+
+// Browser-side ArcGIS layer query (no server needed)
+async function browserQueryLayer(url, lat, lng, outFields) {
+  const params = new URLSearchParams({
+    f: 'json',
+    geometry: JSON.stringify({ x: lng, y: lat, spatialReference: { wkid: 4326 } }),
+    geometryType: 'esriGeometryPoint',
+    inSR: '4326',
+    spatialRel: 'esriSpatialRelIntersects',
+    outFields: outFields || '*',
+    returnGeometry: 'false',
+    resultRecordCount: '1',
+  });
+  try {
+    const resp = await fetch(url + '?' + params.toString(), { signal: AbortSignal.timeout(8000) });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (data.error) return null;
+    return data.features && data.features.length > 0 ? data.features[0].attributes : null;
+  } catch(e) { return null; }
+}
+
+// HBU helper text builders
+function parseZoneBase(zone) {
+  if (!zone) return '—';
+  const m = zone.toUpperCase().trim().match(/^[QT]?\(?([A-Z0-9][A-Z0-9.]*)/);
+  return m ? m[1] : zone.toUpperCase();
+}
+
+function buildFeasibleText(zoneBase, isTOC, tocTier) {
+  const z = (zoneBase || '').toUpperCase();
+  if (z.startsWith('R1') || z === 'RS' || z.startsWith('RE') || z === 'RA')
+    return 'Single-family residential use with ADU is financially feasible given current market conditions.' + (isTOC ? ' TOC Tier ' + tocTier + ' density bonus available for qualified affordable projects.' : '');
+  if (z.startsWith('R2')) return 'Two-family residential use is financially feasible; single-family with ADU also viable.';
+  if (z.startsWith('R3') || z.startsWith('RD')) return 'Multi-family residential development is financially feasible given zone allowances and market demand.';
+  if (z.startsWith('C')) return 'Commercial or mixed-use development is financially feasible; verify per height district and specific plan.';
+  return 'Financial feasibility to be determined based on zoning allowances, market demand, and development costs.';
+}
+
+function buildMaxProdText(zoneBase, isHPOZ, isTOC) {
+  const z = (zoneBase || '').toUpperCase();
+  if (z.startsWith('R1') || z === 'RS' || z.startsWith('RE') || z === 'RA')
+    return isHPOZ ? 'Single-family residence with ADU — HPOZ constraints limit significant alterations.' : 'Single-family residence with ADU as secondary improvement to maximize land utility under current zoning.';
+  if (z.startsWith('R2')) return 'Duplex or single-family with detached ADU to maximize allowable residential density.';
+  if (z.startsWith('R3') || z.startsWith('RD')) return isTOC ? 'Maximum allowable multi-family residential development utilizing TOC density bonus for highest land value.' : 'Maximum allowable multi-family residential development per zone and height district standards.';
+  if (z.startsWith('C')) return 'Commercial or mixed-use development at maximum allowable FAR per height district to maximize productivity.';
+  return 'Use generating the highest value consistent with legal, physical, and financial constraints.';
+}
+
+function buildVacantText(zoneBase, isTOC, isHillside) {
+  const z = (zoneBase || '').toUpperCase();
+  if (z.startsWith('R1') || z === 'RS' || z.startsWith('RE') || z === 'RA')
+    return isHillside ? 'Development of a single-family residence consistent with hillside grading ordinance requirements.' : 'Development of a single-family residence with optional ADU as permitted by right under state law.';
+  if (z.startsWith('R2')) return 'Development of a duplex or single-family residence with ADU to maximize allowable residential density.';
+  if (z.startsWith('R3') || z.startsWith('RD')) return isTOC ? 'Development of a multi-family residential project utilizing TOC density bonus to maximize unit count and land value.' : 'Development of a multi-family residential project at maximum allowable density per zone standards.';
+  if (z.startsWith('C')) return 'Development of a commercial or mixed-use project at maximum allowable FAR consistent with height district and general plan.';
+  return 'Development of the highest and best use consistent with zoning, physical characteristics, and market demand.';
+}
+
+function determineSB9Text(zone, isHPOZ, fireZone) {
+  if (!zone) return 'unknown — insufficient data';
+  const z = zone.toUpperCase();
+  if (!z.startsWith('R1') && !z.startsWith('RS') && !z.startsWith('RE') && z !== 'RA') return 'not applicable — not a single-family zone';
+  if (isHPOZ) return 'likely ineligible — HPOZ';
+  if (fireZone && fireZone.toUpperCase().includes('HIGH')) return 'fire hardening review required';
+  return 'potentially eligible — confirm no specific plan exclusions';
 }
 
 function showLookupResult(type, message, html) {
@@ -910,11 +1076,9 @@ async function handleAddressInput(val) {
   clearTimeout(acTimer);
   acTimer = setTimeout(async () => {
     try {
-      const resp = await fetch('/.netlify/functions/places-autocomplete', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ input: val })
-      });
+      const GOOGLE_KEY = window.GOOGLE_MAPS_KEY || '';
+      if (!GOOGLE_KEY) return;
+      const resp = await fetch('https://maps.googleapis.com/maps/api/place/autocomplete/json?input=' + encodeURIComponent(val) + '&components=country:us&location=34.0522,-118.2437&radius=80000&types=address&key=' + GOOGLE_KEY);
       const data = await resp.json();
       if (!data.predictions || !data.predictions.length) { drop.style.display='none'; return; }
       acResults = data.predictions;
